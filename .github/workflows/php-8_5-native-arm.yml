@@ -111,28 +111,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
-        id: tags
-        run: |
-          REF_TAG="$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          # Note `-arm` suffix on every tag — keeps these distinct from the
-          # QEMU workflow's outputs while we A/B them.
-          {
-            echo "tags<<EOF"
-            echo "-t ${IMAGE}:latest-php8.5-arm"
-            echo "-t ${IMAGE}:${REF_TAG}-php8.5-arm"
-            echo "-t ${IMAGE}:${{ github.sha }}-php8.5-arm"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Create + push multi-arch manifest
         working-directory: /tmp/digests
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
         run: |
-          # imagetools create takes per-arch digest refs and stitches them
-          # into one OCI manifest list, then pushes under each -t tag.
-          docker buildx imagetools create \
-            ${{ steps.tags.outputs.tags }} \
-            $(printf "${IMAGE}@sha256:%s " *)
+          # Build the tag args as a single bash array so cross-step YAML
+          # substitution can't split commands across newlines (the previous
+          # version emitted -t lines via `$GITHUB_OUTPUT` which lost their
+          # \-continuation when YAML interpolated them — bash then ran
+          # only the first half and reported "no sources specified").
+          REF_TAG="${REF_NAME//\//-}"
+          # `-arm` suffix on every tag — keeps these distinct from the
+          # QEMU workflow's outputs while we A/B them.
+          tag_args=(
+            -t "${IMAGE}:latest-php8.5-arm"
+            -t "${IMAGE}:${REF_TAG}-php8.5-arm"
+            -t "${IMAGE}:${GIT_SHA}-php8.5-arm"
+          )
+          # `*` glob runs inside working-directory=/tmp/digests, where each
+          # per-arch leg uploaded a file named after its sha256 digest.
+          source_args=()
+          for digest in *; do
+            source_args+=( "${IMAGE}@sha256:${digest}" )
+          done
+          echo "tags:    ${tag_args[*]}"
+          echo "sources: ${source_args[*]}"
+          docker buildx imagetools create "${tag_args[@]}" "${source_args[@]}"
 
       - name: Inspect resulting manifest
         run: |
