@@ -116,12 +116,13 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           GIT_SHA: ${{ github.sha }}
         run: |
-          # Build the tag args + source digest args as bash arrays, in this
-          # step. Earlier we emitted them via `$GITHUB_OUTPUT` and pulled
-          # via cross-step `${{ steps... }}` substitution — but YAML
-          # preserves embedded newlines, which broke shell \-continuation
-          # and bash split the imagetools call into several commands
-          # (first one without sources → "no sources specified").
+          # Build the tag args + source digest args as bash arrays in
+          # this step. Earlier we emitted tag lines into GITHUB_OUTPUT and
+          # pulled them in a follow-on step via cross-step substitution —
+          # but YAML preserves embedded newlines, which broke shell
+          # backslash continuation and bash split the imagetools call
+          # into several commands (the first one without sources
+          # → "no sources specified").
           REF_TAG="${REF_NAME//\//-}"
           tag_args=(
             -t "${IMAGE}:latest-php8.5"
