@@ -7,6 +7,12 @@
 > Docker Hub when `DOCKERHUB_USERNAME` secret is set).
 >
 > **What this fork changes vs. upstream:**
+> - **PHP 8.5 default** (was 8.3). Pinned to `dunglas/frankenphp:1-php8.5`
+>   because the upstream `latest-php8.5` rolling tag doesn't exist on
+>   Docker Hub even though FrankenPHP ships PHP 8.5 in their numbered
+>   releases. Override with `--build-arg PHP_VERSION=8.3` if your
+>   plugin set isn't 8.5-ready (WP officially says 8.5 is "beta
+>   support" — most plugins work, some don't).
 > - `ENV FORCE_HTTPS=1` (was `0`) — `is_ssl()` works behind a TLS-terminating
 >   edge by default. Opt out with explicit `FORCE_HTTPS=0`.
 > - `wp-content/mu-plugins/contentCachePurge.php` — uses `getenv()` with
@@ -16,6 +22,7 @@
 >   configured.
 > - GitHub Actions workflow publishes to GHCR (zero-config via
 >   `GITHUB_TOKEN`) plus optional Docker Hub mirror.
+> - Dropped `php-8_2.yaml` workflow (PHP 8.2 is EOL).
 
 An enterprise-grade WordPress image built for scale. It uses the new FrankenPHP server bundled with Caddy. Lightning-fast server side caching Caddy module.
 

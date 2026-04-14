@@ -1,10 +1,15 @@
 ARG WORDPRESS_VERSION=latest
-ARG PHP_VERSION=8.3
+# Sellie fork: PHP 8.5 default (was 8.3). FrankenPHP's `latest-php8.5`
+# rolling tag doesn't exist on Docker Hub even though they ship 8.5
+# in their numbered releases — we pin to the `1-*-php8.5` track to
+# get PHP 8.5 while still tracking 1.x patch updates.
+ARG PHP_VERSION=8.5
+ARG FRANKENPHP_TAG=1
 ARG USER=www-data
 
 
 
-FROM dunglas/frankenphp:latest-builder-php${PHP_VERSION} as builder
+FROM dunglas/frankenphp:${FRANKENPHP_TAG}-builder-php${PHP_VERSION} as builder
 
 # Copy xcaddy in the builder image
 COPY --from=caddy:builder /usr/bin/xcaddy /usr/bin/xcaddy
@@ -25,7 +30,7 @@ RUN xcaddy build \
 
 
 FROM wordpress:$WORDPRESS_VERSION as wp
-FROM dunglas/frankenphp:latest-php${PHP_VERSION} AS base
+FROM dunglas/frankenphp:${FRANKENPHP_TAG}-php${PHP_VERSION} AS base
 
 LABEL org.opencontainers.image.title=FrankenWP
 LABEL org.opencontainers.image.description="Optimized WordPress containers to run everywhere. Built with FrankenPHP & Caddy."

@@ -1,4 +1,4 @@
-name: Build & publish (PHP 8.3)
+name: Build & publish (PHP 8.5)
 
 # Sellie fork notes:
 #   - Publishes to GHCR (ghcr.io/connorblack/frankenwp) via the
@@ -59,10 +59,10 @@ jobs:
         run: |
           GHCR="ghcr.io/${{ github.repository_owner }}/frankenwp"
           REF_TAG="$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          TAGS="${GHCR}:latest-php8.3,${GHCR}:${REF_TAG}-php8.3,${GHCR}:${{ github.sha }}-php8.3"
+          TAGS="${GHCR}:latest-php8.5,${GHCR}:${REF_TAG}-php8.5,${GHCR}:${{ github.sha }}-php8.5"
           if [ "${DOCKERHUB_PUBLISH}" = "true" ] && [ -n "${DOCKERHUB_USER}" ]; then
             DH="${DOCKERHUB_USER}/frankenwp"
-            TAGS="${TAGS},${DH}:latest-php8.3,${DH}:${REF_TAG}-php8.3"
+            TAGS="${TAGS},${DH}:latest-php8.5,${DH}:${REF_TAG}-php8.5"
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
           echo "Computed tags:"
@@ -78,4 +78,5 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
           build-args: |
-            PHP_VERSION=8.3
+            PHP_VERSION=8.5
+            FRANKENPHP_TAG=1
