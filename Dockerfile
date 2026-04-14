@@ -35,7 +35,18 @@ ENV CGO_ENABLED=1 XCADDY_SETCAP=1 XCADDY_GO_BUILD_FLAGS='-ldflags="-w -s" -trimp
 
 COPY ./sidekick/middleware/cache ./cache
 
-RUN xcaddy build \
+# Sellie fork: CGO_CFLAGS/CGO_LDFLAGS via php-config.
+# The bundled v1.12.2 source has hardcoded `// #cgo CFLAGS: -I...`
+# directives that match the builder image's PHP install path, so xcaddy
+# build "just worked" against the bundled source without explicit
+# CGO_CFLAGS. HEAD removed those hardcoded paths in favor of the
+# documented build pattern (frankenphp.dev/docs/compile): callers feed
+# php-config output into CGO_*. Without these flags, HEAD's
+# `frankenphp.h:44 #include <Zend/zend_modules.h>` fails with
+# "No such file or directory".
+RUN CGO_CFLAGS="$(php-config --includes)" \
+    CGO_LDFLAGS="-pie $(php-config --ldflags) $(php-config --libs)" \
+    xcaddy build \
     --output /usr/local/bin/frankenphp \
     --with github.com/dunglas/frankenphp=./ \
     --with github.com/dunglas/frankenphp/caddy=./caddy/ \
