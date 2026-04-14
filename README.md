@@ -1,4 +1,21 @@
-# WordPress + FrankenPHP Docker Image
+# WordPress + FrankenPHP Docker Image — sellie fork
+
+> **This is a fork** of [StephenMiracle/frankenwp](https://github.com/StephenMiracle/frankenwp)
+> (last upstream activity June 2024). Maintained at
+> [connorblack/frankenwp](https://github.com/connorblack/frankenwp).
+> Published as `ghcr.io/connorblack/frankenwp:latest-php8.3` (and to
+> Docker Hub when `DOCKERHUB_USERNAME` secret is set).
+>
+> **What this fork changes vs. upstream:**
+> - `ENV FORCE_HTTPS=1` (was `0`) — `is_ssl()` works behind a TLS-terminating
+>   edge by default. Opt out with explicit `FORCE_HTTPS=0`.
+> - `wp-content/mu-plugins/contentCachePurge.php` — uses `getenv()` with
+>   fallbacks instead of `$_SERVER[]` direct reads. No more "Undefined
+>   array key" warnings on every request when the cache purge env vars
+>   are unset; skips the purge call entirely when no `PURGE_KEY` is
+>   configured.
+> - GitHub Actions workflow publishes to GHCR (zero-config via
+>   `GITHUB_TOKEN`) plus optional Docker Hub mirror.
 
 An enterprise-grade WordPress image built for scale. It uses the new FrankenPHP server bundled with Caddy. Lightning-fast server side caching Caddy module.
 

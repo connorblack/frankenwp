@@ -1,17 +1,18 @@
-name: Docker
+name: Build & publish (PHP 8.3)
 
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
+# Sellie fork notes:
+#   - Publishes to GHCR (ghcr.io/connorblack/frankenwp) via the
+#     auto-provided GITHUB_TOKEN, no Docker Hub creds needed.
+#   - Adds a Docker Hub publish step gated on DOCKERHUB_USERNAME +
+#     DOCKERHUB_TOKEN secrets being set; skips silently otherwise.
+#   - Drops linux/arm/v7 (Coolify host is amd64; Apple Silicon dev gets
+#     arm64). Avoids the long emulated builds nobody consumes.
 
 on:
-  schedule:
-    - cron: "35 14 * * *"
   push:
-    branches: ["main"]
-    # Publish semver tags as releases.
+    branches: ["main", "sellie/*"]
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -19,65 +20,55 @@ jobs:
     permissions:
       contents: read
       packages: write
-      # This is used to complete the identity challenge
-      # with sigstore/fulcio when running outside of PRs.
       id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Set up BuildKit Docker container builder to be able to build
-      # multi-platform images and export cache
-      # https://github.com/docker/setup-buildx-action
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      # Docker Hub
-      # Login against Github Docker registry except on PR
-      # https://github.com/docker/login-action
-      - name: Log into wpeverywhere registry
-        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log into GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log into Docker Hub
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
-        with:
-          images: wpeverywhere/frankenwp
+      - name: Compute image tags
+        id: tags
+        run: |
+          # ghcr.io is always; docker hub only when creds are set
+          GHCR="ghcr.io/${{ github.repository_owner }}/frankenwp"
+          REF_TAG="$(echo "${{ github.ref_name }}" | tr '/' '-')"
+          TAGS="${GHCR}:latest-php8.3,${GHCR}:${REF_TAG}-php8.3,${GHCR}:${{ github.sha }}-php8.3"
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            DH="${{ secrets.DOCKERHUB_USERNAME }}/frankenwp"
+            TAGS="${TAGS},${DH}:latest-php8.3,${DH}:${REF_TAG}-php8.3"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Computed tags:"
+          echo "${TAGS}" | tr ',' '\n' | sed 's/^/  /'
 
-      - name: Build and push Latest Docker image
-        id: build-and-push-latest
-        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
-        if: contains(github.ref, 'main')
+      - name: Build & push
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: wpeverywhere/frankenwp:latest-php8.3
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          build-args: |
-            PHP_VERSION=8.3
-
-      # Build and push Docker image with Buildx (don't push on PR)
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        id: build-and-push
-        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
-        if: "!contains(github.ref , 'main')"
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}-php8.3
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           build-args: |
             PHP_VERSION=8.3

@@ -38,7 +38,12 @@ LABEL org.opencontainers.image.vendor="Stephen Miracle"
 # Replace the official binary by the one contained your custom modules
 COPY --from=builder /usr/local/bin/frankenphp /usr/local/bin/frankenphp
 ENV WP_DEBUG=${DEBUG:+1}
-ENV FORCE_HTTPS=0
+# Sellie fork: default FORCE_HTTPS to 1 so wp-config-docker.php's
+# `if (!!getenv("FORCE_HTTPS")) { $_SERVER["HTTPS"] = "on"; }` fires by
+# default. Upstream `=0` broke is_ssl() for every WP behind a TLS-
+# terminating edge (Cloudflare, ALB, Fastly, etc.) and triggered
+# /wp-admin/ redirect loops. Set FORCE_HTTPS=0 explicitly to opt out.
+ENV FORCE_HTTPS=1
 ENV PHP_INI_SCAN_DIR=$PHP_INI_DIR/conf.d
 
 
