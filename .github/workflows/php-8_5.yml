@@ -1,12 +1,19 @@
 name: Build & publish (PHP 8.5)
 
-# Sellie fork notes:
-#   - Publishes to GHCR (ghcr.io/connorblack/frankenwp) via the
-#     auto-provided GITHUB_TOKEN, no Docker Hub creds needed.
-#   - Adds a Docker Hub publish step gated on DOCKERHUB_USERNAME +
-#     DOCKERHUB_TOKEN secrets being set; skips silently otherwise.
-#   - Drops linux/arm/v7 (Coolify host is amd64; Apple Silicon dev gets
-#     arm64). Avoids the long emulated builds nobody consumes.
+# Sellie fork:
+#   - Publishes to GHCR (ghcr.io/connorblack/frankenwp). Auto-provided
+#     GITHUB_TOKEN — no Docker Hub creds needed.
+#   - Multi-arch via build matrix on native runners: ubuntu-latest (amd64)
+#     + ubuntu-24.04-arm (Cobalt 100 arm64), in parallel. The `merge` job
+#     stitches per-arch digests into a multi-arch manifest under the
+#     canonical tag.
+#   - Why not QEMU: emulating arm64 on x86 for CGO-heavy builds (xcaddy +
+#     FrankenPHP-from-source) takes 10-25 min per leg. Native parallel
+#     finishes a cold build in ~8 min and a cache-hit run in <1 min.
+#     Bench: 2026-04-14 — QEMU 23+ min unfinished, native cold 8m43s,
+#     native cached 51s.
+#   - Pattern from docker/build-push-action's official multi-arch example:
+#     https://docs.docker.com/build/ci/github-actions/multi-platform/
 
 on:
   push:
@@ -14,20 +21,28 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/frankenwp
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-      id-token: write
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -39,44 +54,90 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Docker Hub publish is opt-in: set repo vars DOCKERHUB_USER +
-      # DOCKERHUB_TOKEN (token via secrets). Without them, we publish
-      # to GHCR only. Note: GitHub forbids `secrets.X` in `if:`
-      # conditions, so we route through a `vars` toggle and a guard
-      # env var that the login step reads at runtime.
-      - name: Log into Docker Hub
-        if: ${{ vars.DOCKERHUB_PUBLISH == 'true' }}
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USER }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Compute image tags
-        id: tags
-        env:
-          DOCKERHUB_PUBLISH: ${{ vars.DOCKERHUB_PUBLISH }}
-          DOCKERHUB_USER: ${{ vars.DOCKERHUB_USER }}
-        run: |
-          GHCR="ghcr.io/${{ github.repository_owner }}/frankenwp"
-          REF_TAG="$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          TAGS="${GHCR}:latest-php8.5,${GHCR}:${REF_TAG}-php8.5,${GHCR}:${{ github.sha }}-php8.5"
-          if [ "${DOCKERHUB_PUBLISH}" = "true" ] && [ -n "${DOCKERHUB_USER}" ]; then
-            DH="${DOCKERHUB_USER}/frankenwp"
-            TAGS="${TAGS},${DH}:latest-php8.5,${DH}:${REF_TAG}-php8.5"
-          fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-          echo "Computed tags:"
-          echo "${TAGS}" | tr ',' '\n' | sed 's/^/  /'
-
-      - name: Build & push
+      - name: Build & push by digest
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
+          # push-by-digest writes the manifest to GHCR under a digest-only
+          # ref (no tag). The `merge` job below stitches the per-arch
+          # digests into the canonical tagged manifest.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # Per-arch GHA cache scope so amd64 and arm64 don't fight over
+          # the same cache key.
+          cache-from: type=gha,scope=${{ matrix.arch }}-php8.5
+          cache-to: type=gha,scope=${{ matrix.arch }}-php8.5,mode=max
           build-args: |
             PHP_VERSION=8.5
             FRANKENPHP_TAG=1
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}-php8.5
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*-php8.5
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log into GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create + push multi-arch manifest
+        working-directory: /tmp/digests
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          # Build the tag args + source digest args as bash arrays, in this
+          # step. Earlier we emitted them via `$GITHUB_OUTPUT` and pulled
+          # via cross-step `${{ steps... }}` substitution — but YAML
+          # preserves embedded newlines, which broke shell \-continuation
+          # and bash split the imagetools call into several commands
+          # (first one without sources → "no sources specified").
+          REF_TAG="${REF_NAME//\//-}"
+          tag_args=(
+            -t "${IMAGE}:latest-php8.5"
+            -t "${IMAGE}:${REF_TAG}-php8.5"
+            -t "${IMAGE}:${GIT_SHA}-php8.5"
+          )
+          # `*` glob runs in working-directory=/tmp/digests, where each
+          # per-arch leg uploaded a file named after its sha256 digest.
+          source_args=()
+          for digest in *; do
+            source_args+=( "${IMAGE}@sha256:${digest}" )
+          done
+          echo "tags:    ${tag_args[*]}"
+          echo "sources: ${source_args[*]}"
+          docker buildx imagetools create "${tag_args[@]}" "${source_args[@]}"
+
+      - name: Inspect resulting manifest
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:latest-php8.5"
