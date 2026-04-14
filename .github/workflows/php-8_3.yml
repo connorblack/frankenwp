@@ -39,22 +39,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Docker Hub publish is opt-in: set repo vars DOCKERHUB_USER +
+      # DOCKERHUB_TOKEN (token via secrets). Without them, we publish
+      # to GHCR only. Note: GitHub forbids `secrets.X` in `if:`
+      # conditions, so we route through a `vars` toggle and a guard
+      # env var that the login step reads at runtime.
       - name: Log into Docker Hub
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+        if: ${{ vars.DOCKERHUB_PUBLISH == 'true' }}
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Compute image tags
         id: tags
+        env:
+          DOCKERHUB_PUBLISH: ${{ vars.DOCKERHUB_PUBLISH }}
+          DOCKERHUB_USER: ${{ vars.DOCKERHUB_USER }}
         run: |
-          # ghcr.io is always; docker hub only when creds are set
           GHCR="ghcr.io/${{ github.repository_owner }}/frankenwp"
           REF_TAG="$(echo "${{ github.ref_name }}" | tr '/' '-')"
           TAGS="${GHCR}:latest-php8.3,${GHCR}:${REF_TAG}-php8.3,${GHCR}:${{ github.sha }}-php8.3"
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-            DH="${{ secrets.DOCKERHUB_USERNAME }}/frankenwp"
+          if [ "${DOCKERHUB_PUBLISH}" = "true" ] && [ -n "${DOCKERHUB_USER}" ]; then
+            DH="${DOCKERHUB_USER}/frankenwp"
             TAGS="${TAGS},${DH}:latest-php8.3,${DH}:${REF_TAG}-php8.3"
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
