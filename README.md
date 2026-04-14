@@ -13,6 +13,13 @@
 >   releases. Override with `--build-arg PHP_VERSION=8.3` if your
 >   plugin set isn't 8.5-ready (WP officially says 8.5 is "beta
 >   support" — most plugins work, some don't).
+> - **FrankenPHP HEAD source** instead of the `1.12.2` source baked
+>   into the builder image. v1.12.2's `caddy/php-server.go` calls
+>   `caddycmd.LoadConfig` expecting 3 returns; Caddy v2.11+ returns 4.
+>   `xcaddy build` against the bundled source fails with "assignment
+>   mismatch". Pin via `--build-arg FRANKENPHP_COMMIT=<sha>` —
+>   defaults to commit `dbc09d2` (2026-04-09, fixes the call site).
+>   Bump to `v1.12.3` once that release ships.
 > - `ENV FORCE_HTTPS=1` (was `0`) — `is_ssl()` works behind a TLS-terminating
 >   edge by default. Opt out with explicit `FORCE_HTTPS=0`.
 > - `wp-content/mu-plugins/contentCachePurge.php` — uses `getenv()` with

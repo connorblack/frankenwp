@@ -14,6 +14,21 @@ FROM dunglas/frankenphp:${FRANKENPHP_TAG}-builder-php${PHP_VERSION} as builder
 # Copy xcaddy in the builder image
 COPY --from=caddy:builder /usr/bin/xcaddy /usr/bin/xcaddy
 
+# Override the FrankenPHP source pre-baked into the builder image
+# (currently v1.12.2) with HEAD. The bundled v1.12.2 caddy/php-server.go
+# calls caddycmd.LoadConfig expecting 3 returns; Caddy v2.11+ returns 4,
+# so xcaddy build fails with "assignment mismatch: 3 variables but
+# caddycmd.LoadConfig returns 4 values". Fixed in upstream HEAD (commit
+# dbc09d2, 2026-04-09) but not yet released — pin to that SHA for
+# reproducibility, or override at build time once v1.12.3 ships:
+#   --build-arg FRANKENPHP_COMMIT=v1.12.3
+ARG FRANKENPHP_COMMIT=dbc09d2282b548f8f23e278c1adfb648560359a5
+WORKDIR /go/src/app
+RUN find /go/src/app -mindepth 1 -delete && \
+    git clone --no-checkout --depth 200 https://github.com/php/frankenphp.git . && \
+    git checkout ${FRANKENPHP_COMMIT} && \
+    echo "Built FrankenPHP source @ $(git rev-parse HEAD) ($(git log -1 --format=%cI HEAD))"
+
 
 # CGO must be enabled to build FrankenPHP
 ENV CGO_ENABLED=1 XCADDY_SETCAP=1 XCADDY_GO_BUILD_FLAGS='-ldflags="-w -s" -trimpath'
