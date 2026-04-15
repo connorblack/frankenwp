@@ -64,11 +64,15 @@ else
 fi
 
 echo "── cache inventory guard ──"
-# GET to purge path without a configured key should NOT return cache listing
+# GET to purge path without a configured key should NOT return the
+# cache inventory (a JSON object with "disk" and "mem" keys). The
+# request falls through to WordPress which returns an HTML 404 page —
+# so we check that the specific inventory structure is absent, not
+# generic JSON delimiters (WordPress HTML contains { in CSS/JS).
 INVENTORY_RESP=$(curl -sS -o /tmp/cache-inventory.body -w '%{http_code}' \
   "$URL/__cache/purge/")
-run_test "GET /__cache/purge/ does not leak cache inventory (no JSON object)" \
-  "! grep -Eq '^\[|^\{' /tmp/cache-inventory.body"
+run_test "GET /__cache/purge/ does not leak cache inventory" \
+  "! grep -q '\"disk\"' /tmp/cache-inventory.body"
 
 echo
 echo "  $PASS passed, $FAIL failed"
