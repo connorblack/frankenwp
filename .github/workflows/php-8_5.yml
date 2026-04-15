@@ -23,6 +23,13 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/frankenwp
+  # Opt every JavaScript-based GHA action into Node 24 so we don't
+  # rely on Node 20 (deprecated 2025-09-19; runners switch default
+  # to Node 24 on 2026-06-02). This is a no-rewrite escape hatch
+  # while individual actions (checkout@v4, upload-artifact@v4,
+  # docker/*) catch up with v-suffix bumps that bundle Node 24.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
