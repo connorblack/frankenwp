@@ -49,14 +49,27 @@
 	# brute-force attempts before allocating any handler resources.
 	# https://github.com/mholt/caddy-ratelimit#order
 	order rate_limit before wp_cache
+
+	# `handle` doesn't appear in Caddy's default directive sort order,
+	# which means without an explicit `order`, our `handle /healthz`
+	# falls AFTER `php_server` and never matches — php_server already
+	# fielded the request and returned 404. Force handle before all
+	# the cache/php directives so /healthz short-circuits cleanly.
+	order handle before rate_limit
 }
 
 {$CADDY_EXTRA_CONFIG}
 
-## Need to set all hosts with port for the cloud.
-# You may not have the hostname being called due to dynamic IPs and load balancers.
-# Allowing all hosts on port 80 for health checks, local dev & cases where the hostname is unknown.
-{$SERVER_NAME:localhost} {
+## SERVER_NAME default: `:80` (port-only, all hosts) so the container
+# always binds to plain HTTP on 80 — what every behind-proxy
+# deployment (Coolify, Cloudflare tunnel, AWS ELB, etc.) needs. The
+# upstream FrankenWP Caddyfile said `:localhost` which made Caddy
+# auto-cert HTTPS-only on `localhost` and never bind to port 80,
+# producing a 502 Bad Gateway from any upstream proxy. Operators on
+# bare-metal HTTPS set SERVER_NAME=mydomain.com (Caddy auto-certs);
+# operators behind a TLS-terminating edge keep the `:80` default or
+# set SERVER_NAME=mydomain.com,:80 to bind both.
+{$SERVER_NAME::80} {
 	@static {
 		file
 		path *.ico *.css *.js *.gif *.jpg *.jpeg *.png *.svg *.woff *.woff2 *.avif *.webp
