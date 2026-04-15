@@ -208,7 +208,9 @@ func TestGetPurgeInventoryRequiresNonEmptyKey(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if body == "[" || len(body) > 2 && body[0] == '[' {
+		// Inventory is a JSON object {"disk":...,"mem":...}; reject both
+		// object and array shapes to catch any accidental leak.
+		if len(body) > 0 && (body[0] == '{' || body[0] == '[') {
 			t.Fatalf("expected empty-key GET to NOT return cache inventory, got %q", body)
 		}
 	})
@@ -262,7 +264,7 @@ func TestGetPurgeInventoryRequiresNonEmptyKey(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if len(body) > 0 && body[0] == '[' {
+		if len(body) > 0 && (body[0] == '{' || body[0] == '[') {
 			t.Fatalf("expected wrong-key GET to NOT return cache inventory, got %q", body)
 		}
 	})
