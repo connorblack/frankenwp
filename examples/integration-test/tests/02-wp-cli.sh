@@ -8,6 +8,7 @@
 # www-data inside the container so root isn't an issue here).
 set -uo pipefail
 
+URL=${URL:-http://localhost:8181}
 PASS=0
 FAIL=0
 
@@ -53,7 +54,7 @@ run_test "user list ≥ 1 (admin)"     "[[ \$($WP user list --format=count) -ge 
 
 echo "── REST API liveness ──"
 # REST API works = mu-plugins didn't break wp-json routing.
-run_test "GET /wp-json/ returns 200" "curl -fsS http://localhost:8181/wp-json/ | grep -q '\"name\":'"
+run_test "GET /wp-json/ returns 200" "curl -fsS ${URL}/wp-json/ | grep -q '\"name\":'"
 
 echo
 echo "  $PASS passed, $FAIL failed"

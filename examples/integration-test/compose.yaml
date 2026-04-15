@@ -27,8 +27,9 @@ services:
         condition: service_healthy
     ports:
       # 8181 to avoid collision with anyone running a local dev WP
-      # on 8080. Tests probe http://localhost:8181/.
-      - "8181:80"
+      # on 8080. Tests probe http://localhost:${TEST_PORT:-8181}/.
+      # Override: TEST_PORT=9999 bash run.sh
+      - "${TEST_PORT:-8181}:80"
     environment:
       # Let the test exercise SERVER_NAME with port-only (matches
       # production behind a TLS-terminating proxy).

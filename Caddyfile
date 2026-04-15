@@ -8,13 +8,14 @@
 
 	servers {
 		# Trust the proxy chain for {client_ip} / X-Forwarded-* parsing.
-		# `private_ranges` covers RFC1918 + loopback + link-local — the
-		# default-safe set for "behind any reverse proxy on the same host
-		# or private network." Without this, Caddy treats Traefik's IP as
-		# the client and downstream WP plugins (Wordfence, rate-limiters,
-		# is_user_logged_in() edge cases) lose the real visitor IP.
+		# Default: `private_ranges` (RFC1918 + loopback + link-local) —
+		# correct for single-proxy deployments (Coolify Traefik on the
+		# same host). On shared VPCs/Kubernetes where multiple private
+		# clients can reach this container, narrow to your actual proxy
+		# IP(s) via TRUSTED_PROXY_RANGES to prevent X-Forwarded-For
+		# spoofing (which bypasses the rate limiter keyed on {client_ip}).
 		# https://caddyserver.com/docs/caddyfile/options#trusted-proxies
-		trusted_proxies static private_ranges
+		trusted_proxies static {$TRUSTED_PROXY_RANGES:private_ranges}
 
 		# Bound request lifetime so a slow/stalled client can't pin a
 		# PHP thread forever. read_header is the strict gate (10s for a
@@ -116,6 +117,10 @@
 	header {
 		-Server
 		-X-Powered-By
+		# HSTS is set unconditionally. Browsers ignore it over plain HTTP
+		# (RFC 6797 §7.2), so it's harmless in local/example deployments.
+		# When the container is behind a TLS-terminating edge (the
+		# production path), the browser sees it over HTTPS and enforces it.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN

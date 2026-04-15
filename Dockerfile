@@ -101,17 +101,16 @@ ENV FORCE_HTTPS=0
 # so it's grep-discoverable. Disables Go's CGO pointer-passing checks
 # which add ~10-20% overhead on every PHP↔Go call (every request).
 #
-# GOMEMLIMIT — soft memory cap that Go GC honors. Without it the Go
-# runtime doesn't observe the container's cgroup memory limit and runs
-# GC too lazily; under bursty load this leads to OOM kills mid-request.
-# Setting to 80% of `containerMemory` gives Go headroom to GC before
-# hitting the hard limit. Operators MUST set this at deploy time to
-# match their actual container memory (e.g. GOMEMLIMIT=1638MiB for a
-# 2 GB container). The "0" default here is interpreted by Go as
-# "no limit" (= status quo, no regression vs not setting).
+# GOMEMLIMIT — deliberately NOT set in the image. Operators MUST set
+# this at deploy time to ~80% of their container memory limit (e.g.
+# GOMEMLIMIT=1638MiB for a 2 GB container). Without it the Go runtime
+# doesn't observe the container's cgroup memory limit and runs GC too
+# lazily; under bursty load this leads to OOM kills mid-request.
+# IMPORTANT: GOMEMLIMIT=0 is NOT "no limit" — it's a zero-byte limit
+# that makes GC run continuously. Use GOMEMLIMIT=off or simply don't
+# set the var to disable the soft limit.
 # https://pkg.go.dev/runtime#hdr-Environment_Variables
 ENV GODEBUG=cgocheck=0
-ENV GOMEMLIMIT=0
 # Sellie fork removed upstream's `ENV WP_DEBUG=${DEBUG:+1}` line — that
 # line had no effect because wp-config-docker.php reads `WORDPRESS_DEBUG`
 # (not `WP_DEBUG`), and it also emitted an UndefinedVar build warning
@@ -324,10 +323,16 @@ if (!!getenv("DISALLOW_FILE_EDIT")) { define("DISALLOW_FILE_EDIT", true); } \
 define("FS_METHOD", "direct"); \
 set_time_limit(300); |g' /usr/src/wordpress/wp-config-docker.php
 
-# Adding WordPress CLI
-RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
-    chmod +x wp-cli.phar && \
-    mv wp-cli.phar /usr/local/bin/wp
+# Pin WP-CLI to a specific release for supply chain reproducibility.
+# Bump by updating WP_CLI_VERSION + WP_CLI_SHA512 together. Get the
+# checksum for a new version:
+#   curl -sL https://github.com/wp-cli/wp-cli/releases/download/v<VER>/wp-cli-<VER>.phar | sha512sum
+ARG WP_CLI_VERSION=2.12.0
+ARG WP_CLI_SHA512=be928f6b8ca1e8dfb9d2f4b75a13aa4aee0896f8a9a0a1c45cd5d2c98605e6172e6d014dda2e27f88c98befc16c040cbb2bd1bfa121510ea5cdf5f6a30fe8832
+RUN curl -fsSL "https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar" \
+      -o /usr/local/bin/wp && \
+    echo "${WP_CLI_SHA512}  /usr/local/bin/wp" | sha512sum -c - && \
+    chmod +x /usr/local/bin/wp
 
 COPY Caddyfile /etc/caddy/Caddyfile
 

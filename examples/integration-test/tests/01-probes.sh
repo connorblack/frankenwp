@@ -28,6 +28,20 @@ run_test() {
   fi
 }
 
+# Install WP before capturing headers that depend on installed state.
+# Security headers + /healthz come from Caddy (no WP needed), but
+# wp-login, wp-admin, and compression tests need WP installed —
+# otherwise WP redirects to /wp-admin/install.php instead of
+# /wp-login.php and the routing assertions fail.
+CID=$(docker compose -p frankenwp-integration ps -q wordpress)
+docker exec --user www-data "$CID" wp --path=/var/www/html core install \
+  --url="${URL}" \
+  --title='IntegTest' \
+  --admin_user='admin' \
+  --admin_password='admin-test-pw' \
+  --admin_email='admin@example.com' \
+  --skip-email >/dev/null 2>&1 || true
+
 # Capture once so multiple greps share the same response.
 HEADERS=$(curl -fsS -D - -o /dev/null "$URL/" 2>&1 || curl -sS -D - -o /dev/null "$URL/")
 HEALTHZ=$(curl -sS -o /tmp/healthz.body -w '%{http_code}' "$URL/healthz")
@@ -96,16 +110,7 @@ PURGE_WARNS=$(docker compose -p frankenwp-integration logs wordpress 2>&1 | \
 run_test "0 PURGE warnings in logs"    "[[ \"\$PURGE_WARNS\" == \"0\" ]]"
 
 echo "── WP hardening constants (DISALLOW_FILE_EDIT) ──"
-# Install WP first to get a working wp-cli env. We'll reuse this
-# install in 02-wp-cli.sh too. If install fails, the constant probe
-# also fails — that's fine, both surface as failures.
-docker exec --user www-data "$CID" wp --path=/var/www/html core install \
-  --url=http://localhost:8181 \
-  --title='IntegTest' \
-  --admin_user='admin' \
-  --admin_password='admin-test-pw' \
-  --admin_email='admin@example.com' \
-  --skip-email >/dev/null 2>&1 || true
+# wp core install already ran at the top of this script.
 
 HOME_TITLE=$(curl -sS "$URL/" | grep -m1 -o '<title>[^<]*</title>')
 PAGE_TITLE=$(curl -sS "$URL/?page_id=2" | grep -m1 -o '<title>[^<]*</title>')
