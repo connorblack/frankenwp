@@ -120,6 +120,7 @@ jobs:
       - name: Create + push multi-arch manifest
         working-directory: /tmp/digests
         env:
+          GITHUB_REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           GIT_SHA: ${{ github.sha }}
         run: |
@@ -132,10 +133,14 @@ jobs:
           # → "no sources specified").
           REF_TAG="${REF_NAME//\//-}"
           tag_args=(
-            -t "${IMAGE}:latest-php8.5"
             -t "${IMAGE}:${REF_TAG}-php8.5"
             -t "${IMAGE}:${GIT_SHA}-php8.5"
           )
+          inspect_tag="${IMAGE}:${REF_TAG}-php8.5"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag_args=( -t "${IMAGE}:latest-php8.5" "${tag_args[@]}" )
+            inspect_tag="${IMAGE}:latest-php8.5"
+          fi
           # `*` glob runs in working-directory=/tmp/digests, where each
           # per-arch leg uploaded a file named after its sha256 digest.
           source_args=()
@@ -144,11 +149,12 @@ jobs:
           done
           echo "tags:    ${tag_args[*]}"
           echo "sources: ${source_args[*]}"
+          echo "INSPECT_TAG=${inspect_tag}" >> "$GITHUB_ENV"
           docker buildx imagetools create "${tag_args[@]}" "${source_args[@]}"
 
       - name: Inspect resulting manifest
         run: |
-          docker buildx imagetools inspect "${IMAGE}:latest-php8.5"
+          docker buildx imagetools inspect "${INSPECT_TAG}"
 
   scan:
     # CVE scan, non-blocking. Runs after the multi-arch image is
@@ -164,10 +170,23 @@ jobs:
       security-events: write
       packages: read
     steps:
+      - name: Resolve image tag to scan
+        id: image_tag
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          ref_tag="${REF_NAME//\//-}"
+          image_ref="${IMAGE}:${ref_tag}-php8.5"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            image_ref="${IMAGE}:latest-php8.5"
+          fi
+          echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
+
       - name: Run Trivy on the multi-arch image (HIGH+CRITICAL)
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ env.IMAGE }}:latest-php8.5
+          image-ref: ${{ steps.image_tag.outputs.image_ref }}
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL

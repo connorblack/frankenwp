@@ -20,8 +20,9 @@
 >   mismatch". Pin via `--build-arg FRANKENPHP_COMMIT=<sha>` —
 >   defaults to commit `dbc09d2` (2026-04-09, fixes the call site).
 >   Bump to `v1.12.3` once that release ships.
-> - `ENV FORCE_HTTPS=1` (was `0`) — `is_ssl()` works behind a TLS-terminating
->   edge by default. Opt out with explicit `FORCE_HTTPS=0`.
+> - `ENV FORCE_HTTPS=0` by default — plain-HTTP local/example deployments
+>   stay correct out of the box. TLS-terminating edge deployments opt in
+>   with explicit `FORCE_HTTPS=1`.
 > - `wp-content/mu-plugins/contentCachePurge.php` — uses `getenv()` with
 >   fallbacks instead of `$_SERVER[]` direct reads. No more "Undefined
 >   array key" warnings on every request when the cache purge env vars
@@ -31,6 +32,8 @@
 >   `GITHUB_TOKEN`) plus optional Docker Hub mirror, on a native
 >   arm64 build matrix (`ubuntu-latest` + `ubuntu-24.04-arm`)
 >   instead of QEMU-emulated arm64 — ~10× faster steady-state CI.
+>   The canonical `latest-php8.5` tag is only published from `main`
+>   and release tags; feature branches publish branch/SHA tags only.
 > - Dropped `php-8_2.yaml` workflow (PHP 8.2 is EOL).
 > - **Caddyfile hardening**: `trusted_proxies static private_ranges`
 >   so `{client_ip}` is the real visitor IP behind a reverse proxy;
@@ -45,7 +48,9 @@
 >   `/xmlrpc.php` (upstream missed both — stale auth nonce risk);
 >   query-string requests bypass cache by default and query-aware
 >   cache keys prevent `/?p=1` / `/?page_id=2` / `?rest_route=...`
->   from colliding with the same path-only cache entry.
+>   from colliding with the same path-only cache entry. If operators
+>   opt back into query-string caching, purge requests flush the whole
+>   cache so stale query variants cannot survive content updates.
 > - **Brute-force protection**: `caddy-ratelimit` plugin baked in
 >   with a default zone of 5 attempts per client IP per 5 minutes
 >   against `POST /wp-login.php` and `POST /xmlrpc.php`. Tunable
@@ -85,9 +90,9 @@
 > - **Image hygiene**: dropped upstream's redundant pre-install of
 >   dev headers (libonig/libxml2/libcurl/libssl/libzip/libjpeg/
 >   libwebp/libmemcached) — `install-php-extensions` already manages
->   its own build deps and cleans them up. Also dropped `ghostscript`
->   (CVE magnet — Imagick's PDF→raster delegate; not used by typical
->   WP image processing) and `git`/`unzip` (build-time only).
+>   its own build deps and cleans them up. Kept `ghostscript` so
+>   Imagick can still render PDF thumbnails/metadata in the WordPress
+>   media library. Dropped `git`/`unzip` (build-time only).
 > - **Integration test**: `examples/integration-test/` — Docker
 >   Compose stack (image + MariaDB) with a probe runner that
 >   verifies security headers, /healthz, rate-limit behavior,
@@ -158,7 +163,9 @@ The production posture is intentionally conservative:
 
 This keeps the cache correctness-first. If you later want WP Engine-style
 marketing-parameter normalization, add it deliberately instead of turning
-query-string caching back on broadly.
+query-string caching back on broadly. If you explicitly opt back into
+query-string caching, purge requests flush the full cache so stale
+query-string variants cannot survive a post save.
 
 #### Wordpress
 
@@ -168,7 +175,7 @@ query-string caching back on broadly.
 - `DB_HOST`: The WordPress database host.
 - `DB_TABLE_PREFIX`: The WordPress database table prefix.
 - `WP_DEBUG`: Turns on WordPress Debug.
-- `FORCE_HTTPS`: Tells WordPress to use https on requests. This is beneficial behind load balancer. Defaults to true.
+- `FORCE_HTTPS`: Tells WordPress to use https on requests. This is beneficial behind a TLS-terminating edge. Defaults to false.
 - `WORDPRESS_CONFIG_EXTRA`: use this for adding WP_HOME, WP_SITEURL, etc
 
 ## Questions

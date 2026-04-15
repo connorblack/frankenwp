@@ -6,6 +6,7 @@ services:
       - "8099:80" # HTTP
     environment:
       SERVER_NAME: ${SERVER_NAME:-:80}
+      FORCE_HTTPS: ${FORCE_HTTPS:-0}
       WORDPRESS_DB_HOST: ${DB_HOST:-db}
       WORDPRESS_DB_USER: ${DB_USER:-exampleuser}
       WORDPRESS_DB_PASSWORD: ${DB_PASSWORD:-examplepass}

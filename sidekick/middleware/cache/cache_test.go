@@ -179,3 +179,49 @@ func TestServeHTTPBypassesConfiguredCookieFlows(t *testing.T) {
 		t.Fatalf("expected bypassed cookie request to avoid cache header, got %q", got)
 	}
 }
+
+func TestServeHTTPFlushesCacheOnPurgeWhenQueryCachingEnabled(t *testing.T) {
+	store := NewStore(t.TempDir(), 600, zap.NewNop())
+	if err := store.Set("none::/?page_id=2", 0, []byte("query-cache")); err != nil {
+		t.Fatalf("Set(query cache) returned error: %v", err)
+	}
+	if err := store.Set("none::/sample-page/", 0, []byte("pretty-cache")); err != nil {
+		t.Fatalf("Set(pretty cache) returned error: %v", err)
+	}
+
+	cache := Cache{
+		logger:             zap.NewNop(),
+		Store:              store,
+		PurgePath:          "/__cache/purge",
+		PurgeKey:           "secret",
+		BypassQueryStrings: false,
+		CacheResponseCodes: []string{"2"},
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"http://example.com/__cache/purge/sample-page/",
+		nil,
+	)
+	req.Header.Set("X-WPSidekick-Purge-Key", "secret")
+	rec := httptest.NewRecorder()
+
+	if err := cache.ServeHTTP(rec, req, testHandler(func(w http.ResponseWriter, r *http.Request) error {
+		t.Fatal("purge request should not hit next handler")
+		return nil
+	})); err != nil {
+		t.Fatalf("ServeHTTP(purge) returned error: %v", err)
+	}
+
+	if got := rec.Body.String(); got != "OK" {
+		t.Fatalf("expected purge response body OK, got %q", got)
+	}
+
+	if _, err := store.Get("none::/?page_id=2"); err == nil {
+		t.Fatal("expected query-string cache entry to be purged by flush")
+	}
+
+	if _, err := store.Get("none::/sample-page/"); err == nil {
+		t.Fatal("expected pretty permalink cache entry to be purged by flush")
+	}
+}

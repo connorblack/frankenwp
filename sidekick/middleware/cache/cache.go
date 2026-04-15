@@ -267,10 +267,16 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 			pathToPurge := strings.Replace(r.URL.Path, c.PurgePath, "", 1)
 			c.logger.Debug("wp cache - purge", zap.String("path", pathToPurge))
 
-			if len(pathToPurge) < 2 {
-				go db.Flush()
+			// Query-aware caching (`BYPASS_QUERY_STRINGS=false`) can create many
+			// aliases for the same content (`/?p=1`, `/?page_id=2`, marketing
+			// params, etc.). The purge hook only knows "content changed", not the
+			// full query-key space for that content, so a targeted purge would miss
+			// stale variants. In that opt-in mode, fail safe: purge requests flush
+			// the whole cache instead of risking stale query-string hits.
+			if !c.BypassQueryStrings || len(pathToPurge) < 2 {
+				db.Flush()
 			} else {
-				go db.Purge(pathToPurge)
+				db.Purge(pathToPurge)
 			}
 		} else {
 			c.logger.Warn("wp cache - purge - invalid key", zap.String("path", r.URL.Path))

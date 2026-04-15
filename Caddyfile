@@ -192,7 +192,9 @@
 		# Query-string routes must not alias into a path-only cache entry.
 		# Default to bypassing any non-empty query string. Operators who
 		# explicitly opt back in (`BYPASS_QUERY_STRINGS=false`) still get
-		# distinct cache keys because the module includes RawQuery.
+		# distinct cache keys because the module includes RawQuery. In that
+		# opt-in mode, purge requests flush the whole cache so stale query
+		# variants cannot survive a content update.
 		bypass_query_strings {$BYPASS_QUERY_STRINGS:true}
 		# Home-page caching remains a separate policy knob. Edge-cache
 		# deployments (Cloudflare, Fastly, etc.) often prefer

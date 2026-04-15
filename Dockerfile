@@ -89,12 +89,10 @@ LABEL org.opencontainers.image.vendor="Connor Black (sellie fork of Stephen Mira
 
 # Replace the official binary by the one contained your custom modules
 COPY --from=builder /usr/local/bin/frankenphp /usr/local/bin/frankenphp
-# Sellie fork: default FORCE_HTTPS to 1 so wp-config-docker.php's
-# `if (!!getenv("FORCE_HTTPS")) { $_SERVER["HTTPS"] = "on"; }` fires by
-# default. Upstream `=0` broke is_ssl() for every WP behind a TLS-
-# terminating edge (Cloudflare, ALB, Fastly, etc.) and triggered
-# /wp-admin/ redirect loops. Set FORCE_HTTPS=0 explicitly to opt out.
-ENV FORCE_HTTPS=1
+# Keep FORCE_HTTPS opt-in. Plain-HTTP local/example deployments expose only
+# port 80 and break when WordPress unconditionally thinks the request is HTTPS.
+# Operators behind a TLS-terminating edge set FORCE_HTTPS=1 explicitly.
+ENV FORCE_HTTPS=0
 
 # Go runtime tuning for containerized FrankenPHP.
 #
@@ -129,13 +127,15 @@ ENV PHP_INI_SCAN_DIR=$PHP_INI_DIR/conf.d
 # the installer only cleans up the packages IT added). Sellie fork:
 # reduced to genuine runtime needs only.
 #
-# Removed vs upstream: ghostscript (CVE magnet — Imagick's PDF→raster
-# delegate is not needed for typical WP image processing); git, unzip
+# Kept vs upstream removals: ghostscript stays because WordPress uses
+# Imagick's PDF delegate to render Media Library thumbnails/metadata for
+# uploaded PDFs. git, unzip
 # (build-time only — not used at runtime); all -dev packages
 # (install-php-extensions handles its own deps).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -283,8 +283,8 @@ RUN sed -i \
 #
 #   1. FORCE_HTTPS=1 → $_SERVER['HTTPS']='on' so is_ssl() returns true
 #      behind a TLS-terminating edge (Cloudflare, ALB, Fastly).
-#      Documented as upstream FrankenWP behavior; sellie fork defaults
-#      the env var to 1 (see ENV FORCE_HTTPS=1 above).
+#      Kept opt-in so plain-HTTP local/example deployments don't emit
+#      https:// links or redirect to a port where no TLS listener exists.
 #
 #   2. DISABLE_WP_CRON=1 → define('DISABLE_WP_CRON', true) so WP doesn't
 #      spawn cron-on-pageview. WP cron-on-pageview is unreliable under

@@ -85,6 +85,9 @@ run_test "opcache.jit env-substituted (== tracing)" "[[ \"\$JIT_STATUS\" == \"tr
 REDIS_LOADED=$(docker exec "$CID" php -r 'echo extension_loaded("redis")?"yes":"no";')
 run_test "redis extension preinstalled" "[[ \"\$REDIS_LOADED\" == \"yes\" ]]"
 
+GS_VERSION=$(docker exec "$CID" sh -lc 'gs --version' 2>&1)
+run_test "ghostscript available for PDF thumbnails" "[[ \"\$GS_VERSION\" =~ ^10\\.|^9\\. ]]"
+
 echo "── PHP error log scan (no PURGE warnings) ──"
 # The fork's mu-plugin uses getenv() with fallbacks — should NOT emit
 # the "Undefined array key" warnings the upstream version did.
