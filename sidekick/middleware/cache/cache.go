@@ -252,7 +252,9 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 		// Only return cache inventory when a non-empty purge key is
 		// configured and the request supplies the matching key. Empty
 		// keys must not leak the cache listing to unauthenticated callers.
-		if c.PurgeKey != "" && key == c.PurgeKey {
+		if c.PurgeKey == "" {
+			c.logger.Debug("wp cache - purge inventory disabled (no PURGE_KEY configured)", zap.String("path", r.URL.Path))
+		} else if key == c.PurgeKey {
 			cacheList := db.List()
 
 			json.NewEncoder(w).Encode(cacheList)

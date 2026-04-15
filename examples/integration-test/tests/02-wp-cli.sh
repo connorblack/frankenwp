@@ -8,6 +8,7 @@
 # www-data inside the container so root isn't an issue here).
 set -uo pipefail
 
+URL=${URL:-http://localhost:8181}
 PASS=0
 FAIL=0
 

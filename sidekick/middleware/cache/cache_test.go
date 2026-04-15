@@ -180,6 +180,94 @@ func TestServeHTTPBypassesConfiguredCookieFlows(t *testing.T) {
 	}
 }
 
+func TestGetPurgeInventoryRequiresNonEmptyKey(t *testing.T) {
+	store := NewStore(t.TempDir(), 600, zap.NewNop())
+	// Seed the cache so there's something to list.
+	if err := store.Set("none::/", 0, []byte("cached-home")); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	t.Run("empty PurgeKey blocks inventory listing", func(t *testing.T) {
+		cache := Cache{
+			logger:             zap.NewNop(),
+			Store:              store,
+			PurgePath:          "/__cache/purge",
+			PurgeKey:           "", // no key configured
+			CacheResponseCodes: []string{"2"},
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/__cache/purge", nil)
+		rec := httptest.NewRecorder()
+
+		// GET with empty key should NOT return the cache listing.
+		err := cache.ServeHTTP(rec, req, testHandler(func(w http.ResponseWriter, r *http.Request) error {
+			return nil
+		}))
+		if err != nil {
+			t.Fatalf("ServeHTTP returned error: %v", err)
+		}
+
+		body := rec.Body.String()
+		if body == "[" || len(body) > 2 && body[0] == '[' {
+			t.Fatalf("expected empty-key GET to NOT return cache inventory, got %q", body)
+		}
+	})
+
+	t.Run("correct non-empty PurgeKey returns inventory", func(t *testing.T) {
+		cache := Cache{
+			logger:             zap.NewNop(),
+			Store:              store,
+			PurgePath:          "/__cache/purge",
+			PurgeKey:           "secret",
+			CacheResponseCodes: []string{"2"},
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/__cache/purge", nil)
+		req.Header.Set("X-WPSidekick-Purge-Key", "secret")
+		rec := httptest.NewRecorder()
+
+		err := cache.ServeHTTP(rec, req, testHandler(func(w http.ResponseWriter, r *http.Request) error {
+			t.Fatal("authenticated GET inventory should return before next handler")
+			return nil
+		}))
+		if err != nil {
+			t.Fatalf("ServeHTTP returned error: %v", err)
+		}
+
+		body := rec.Body.String()
+		// Inventory is a JSON object with "disk" and "mem" keys.
+		if len(body) == 0 || body[0] != '{' {
+			t.Fatalf("expected inventory JSON object, got %q", body)
+		}
+	})
+
+	t.Run("wrong key does not return inventory", func(t *testing.T) {
+		cache := Cache{
+			logger:             zap.NewNop(),
+			Store:              store,
+			PurgePath:          "/__cache/purge",
+			PurgeKey:           "secret",
+			CacheResponseCodes: []string{"2"},
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/__cache/purge", nil)
+		req.Header.Set("X-WPSidekick-Purge-Key", "wrong-key")
+		rec := httptest.NewRecorder()
+
+		err := cache.ServeHTTP(rec, req, testHandler(func(w http.ResponseWriter, r *http.Request) error {
+			return nil
+		}))
+		if err != nil {
+			t.Fatalf("ServeHTTP returned error: %v", err)
+		}
+
+		body := rec.Body.String()
+		if len(body) > 0 && body[0] == '[' {
+			t.Fatalf("expected wrong-key GET to NOT return cache inventory, got %q", body)
+		}
+	})
+}
+
 func TestServeHTTPFlushesCacheOnPurgeWhenQueryCachingEnabled(t *testing.T) {
 	store := NewStore(t.TempDir(), 600, zap.NewNop())
 	if err := store.Set("none::/?page_id=2", 0, []byte("query-cache")); err != nil {

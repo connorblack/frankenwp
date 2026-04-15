@@ -9,8 +9,9 @@
  *   - Original used $_SERVER['PURGE_KEY']/['PURGE_PATH'] without
  *     existence checks, logging "Undefined array key" on every request
  *     when the env vars were unset. This version reads via getenv() with
- *     fallbacks and skips the purge call entirely when no purge key is
- *     configured (no point hitting an endpoint that can't authenticate).
+ *     fallbacks. When PURGE_KEY is unset, purge requests are still sent
+ *     (empty key header) so cache invalidation works out of the box —
+ *     sidekick accepts empty-key purges when its config key is also empty.
  *   - Plugin is itself idempotent — a 404 from the purge endpoint
  *     doesn't break post saves.
  */
