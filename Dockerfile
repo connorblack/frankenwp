@@ -295,9 +295,18 @@ RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli
 
 COPY Caddyfile /etc/caddy/Caddyfile
 
-# Caddy requires an additional capability to bind to port 80 and 443
-RUN useradd -D ${USER} && \
-    setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp
+# Caddy requires CAP_NET_BIND_SERVICE to bind to ports below 1024 as
+# the non-root www-data user.
+#
+# Sellie fork: dropped upstream's `useradd -D ${USER}` prefix on this
+# RUN. `useradd -D <name>` is invalid syntax — the -D flag prints
+# defaults and ignores positional args on older Debians but errors on
+# Trixie/current Bookworm useradd. www-data is already created by the
+# upstream php base image (which dunglas/frankenphp extends), so the
+# useradd was a no-op typo at best. Past builds passed only because
+# GHA cache hits skipped the layer; the first true cold build on the
+# new Dockerfile exposed it.
+RUN setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp
 
 # Caddy requires write access to /data/caddy and /config/caddy
 RUN chown -R ${USER}:${USER} /data/caddy && \
