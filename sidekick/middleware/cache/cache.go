@@ -246,7 +246,13 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 	db := c.Store
 	nw := NewCustomWriter(w, r, db, c.logger, cachePathForRequest(r), c.CacheResponseCodes)
 
-	if strings.Contains(r.URL.Path, c.PurgePath) && r.Method == "GET" {
+	// Match the purge endpoint strictly: exact path or path followed by
+	// "/". Prevents false matches like "/foo/__cache/purge" (Contains) or
+	// "/__cache/purge-malicious" (bare HasPrefix).
+	isPurgeRoute := r.URL.Path == c.PurgePath ||
+		strings.HasPrefix(r.URL.Path, c.PurgePath+"/")
+
+	if isPurgeRoute && r.Method == "GET" {
 		key := r.Header.Get("X-WPSidekick-Purge-Key")
 
 		// Only return cache inventory when a non-empty purge key is
@@ -265,11 +271,11 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	if strings.Contains(r.URL.Path, c.PurgePath) && r.Method == "POST" {
+	if isPurgeRoute && r.Method == "POST" {
 		key := r.Header.Get("X-WPSidekick-Purge-Key")
 
 		if key == c.PurgeKey {
-			pathToPurge := strings.Replace(r.URL.Path, c.PurgePath, "", 1)
+			pathToPurge := strings.TrimPrefix(r.URL.Path, c.PurgePath)
 			c.logger.Debug("wp cache - purge", zap.String("path", pathToPurge))
 
 			// Query-aware caching (`BYPASS_QUERY_STRINGS=false`) can create many
