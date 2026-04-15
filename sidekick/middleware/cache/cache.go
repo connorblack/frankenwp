@@ -1,30 +1,31 @@
 package cache
 
 import (
+	"encoding/json"
+	"net/http"
 	"os"
-	"strings"
 	"regexp"
 	"strconv"
-	"encoding/json"
+	"strings"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 type Cache struct {
-	logger   *zap.Logger
-	Loc     string
-	PurgePath string
-	PurgeKey string
+	logger             *zap.Logger
+	Loc                string
+	PurgePath          string
+	PurgeKey           string
 	BypassPathPrefixes []string
-	BypassHome bool
+	BypassHome         bool
+	BypassQueryStrings bool
 	CacheResponseCodes []string
-	TTL int
-	Store *Store
+	TTL                int
+	Store              *Store
 }
 
 func init() {
@@ -60,9 +61,10 @@ func (c *Cache) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			c.BypassPathPrefixes = strings.Split(strings.TrimSpace(value), ",")
 
 		case "bypass_home":
-			if value == "true" {
-				c.BypassHome = true
-			}
+			c.BypassHome = strings.EqualFold(value, "true")
+
+		case "bypass_query_strings":
+			c.BypassQueryStrings = strings.EqualFold(value, "true")
 
 		case "cache_response_codes":
 			codes := strings.Split(strings.TrimSpace(value), ",")
@@ -125,6 +127,12 @@ func (c *Cache) Provision(ctx caddy.Context) error {
 		}
 	}
 
+	if c.BypassQueryStrings == false {
+		if os.Getenv("BYPASS_QUERY_STRINGS") == strings.ToLower("true") {
+			c.BypassQueryStrings = true
+		}
+	}
+
 	if c.TTL == 0 {
 		ttl, err := strconv.Atoi(os.Getenv("TTL"))
 		if err != nil {
@@ -137,7 +145,7 @@ func (c *Cache) Provision(ctx caddy.Context) error {
 		c.PurgePath = os.Getenv("PURGE_PATH")
 
 		if c.PurgePath == "" {
-			c.PurgePath = "/__wp_cache/purge"
+			c.PurgePath = "/__cache/purge"
 		}
 	}
 
@@ -157,6 +165,18 @@ func (Cache) CaddyModule() caddy.ModuleInfo {
 			return new(Cache)
 		},
 	}
+}
+
+func cachePathForRequest(r *http.Request) string {
+	if r.URL.RawQuery == "" {
+		return r.URL.Path
+	}
+
+	return r.URL.Path + "?" + r.URL.RawQuery
+}
+
+func cacheKeyForRequest(r *http.Request, encoding string) string {
+	return encoding + "::" + cachePathForRequest(r)
 }
 
 // ServeHTTP implements the caddy.Handler interface.
@@ -182,18 +202,23 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 		bypass = true
 	}
 
+	// Query-string routes must not alias into the same path-only cache
+	// entry. Default to bypassing them entirely; operators who opt back
+	// in still get distinct cache keys per query string.
+	if c.BypassQueryStrings && r.URL.RawQuery != "" {
+		bypass = true
+	}
+
 	if c.BypassHome && r.URL.Path == "/" {
 		bypass = true
 	}
 
-	
-
-	if bypass  {
+	if bypass {
 		return next.ServeHTTP(w, r)
 	}
 
 	db := c.Store
-	nw := NewCustomWriter(w, r, db, c.logger, r.URL.Path, c.CacheResponseCodes)
+	nw := NewCustomWriter(w, r, db, c.logger, cachePathForRequest(r), c.CacheResponseCodes)
 
 	if strings.Contains(r.URL.Path, c.PurgePath) && r.Method == "GET" {
 		key := r.Header.Get("X-WPSidekick-Purge-Key")
@@ -229,7 +254,7 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 
 		return nil
 	}
-	
+
 	// bypass if is logged in. We don't want to cache admin bars
 	cookies := r.Header.Get("Cookie")
 	if strings.Contains(cookies, "wordpress_logged_in") {
@@ -252,14 +277,14 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 		encoding = "none"
 	}
 
-	cacheKey := encoding + "::" + r.URL.Path
+	cacheKey := cacheKeyForRequest(r, encoding)
 	cacheItem, err := db.Get(cacheKey)
 
 	if err != nil {
-		c.logger.Debug("wp cache - error - " + cacheKey, zap.Error(err))
+		c.logger.Debug("wp cache - error - "+cacheKey, zap.Error(err))
 	}
 
-	if err == nil {		
+	if err == nil {
 		w.Header().Set("X-WPEverywhere-Cache", "HIT")
 		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 		w.Header().Set("Server", "Caddy")
@@ -269,7 +294,5 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 
 		return nil
 	}
-
-
 	return next.ServeHTTP(nw, r)
 }

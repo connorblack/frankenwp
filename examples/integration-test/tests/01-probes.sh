@@ -104,6 +104,18 @@ docker exec --user www-data "$CID" wp --path=/var/www/html core install \
   --admin_email='admin@example.com' \
   --skip-email >/dev/null 2>&1 || true
 
+HOME_TITLE=$(curl -sS "$URL/" | grep -m1 -o '<title>[^<]*</title>')
+PAGE_TITLE=$(curl -sS "$URL/?page_id=2" | grep -m1 -o '<title>[^<]*</title>')
+POST_TITLE=$(curl -sS "$URL/?p=1" | grep -m1 -o '<title>[^<]*</title>')
+
+echo "── query-string routing cache regression ──"
+run_test "/?page_id=2 renders Sample Page title" \
+                                    "echo \"\$PAGE_TITLE\" | grep -q 'Sample Page'"
+run_test "/?p=1 renders Hello world title" \
+                                    "echo \"\$POST_TITLE\" | grep -q 'Hello world'"
+run_test "home/page/post titles stay distinct" \
+                                    "[[ \"\$HOME_TITLE\" != \"\$PAGE_TITLE\" && \"\$HOME_TITLE\" != \"\$POST_TITLE\" && \"\$PAGE_TITLE\" != \"\$POST_TITLE\" ]]"
+
 DISALLOW_FE=$(docker exec --user www-data "$CID" wp --path=/var/www/html eval \
   'echo defined("DISALLOW_FILE_EDIT") && DISALLOW_FILE_EDIT === true ? "yes" : "no";' 2>/dev/null)
 run_test "DISALLOW_FILE_EDIT defined+true" "[[ \"\$DISALLOW_FE\" == \"yes\" ]]"

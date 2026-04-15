@@ -167,13 +167,21 @@
 		ttl {$TTL:6000}
 		purge_path {$PURGE_PATH:/__cache/purge}
 		purge_key {$PURGE_KEY}
+		# Query-string routes must not alias into a path-only cache entry.
+		# Default to bypassing any non-empty query string. Operators who
+		# explicitly opt back in (`BYPASS_QUERY_STRINGS=false`) still get
+		# distinct cache keys because the module includes RawQuery.
+		bypass_query_strings {$BYPASS_QUERY_STRINGS:true}
+		# Home-page caching remains a separate policy knob. Edge-cache
+		# deployments (Cloudflare, Fastly, etc.) often prefer
+		# BYPASS_HOME=true so the CDN owns HTML caching; bare origin-cache
+		# deployments can keep the default false.
 		bypass_home {$BYPASS_HOME:false}
 		# Defaults expanded vs upstream: /wp-login.php and /xmlrpc.php
 		# both authenticate per-request and must never serve from cache;
 		# the upstream default of just /wp-admin,/wp-json missed both
 		# (a stale wp-login.php response could serve another visitor's
-		# nonce). Operators on edge cache (Cloudflare) usually want
-		# bypass_home=true via env so CF owns HTML cache exclusively.
+		# nonce).
 		bypass_path_prefixes {$BYPASS_PATH_PREFIXES:/wp-admin,/wp-json,/wp-login.php,/xmlrpc.php}
 	}
 

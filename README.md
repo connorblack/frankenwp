@@ -42,7 +42,10 @@
 >   limits agree; `/healthz` endpoint that bypasses PHP entirely
 >   (Coolify/Traefik-friendly liveness probe); `wp_cache
 >   bypass_path_prefixes` extended to include `/wp-login.php` +
->   `/xmlrpc.php` (upstream missed both — stale auth nonce risk).
+>   `/xmlrpc.php` (upstream missed both — stale auth nonce risk);
+>   query-string requests bypass cache by default and query-aware
+>   cache keys prevent `/?p=1` / `/?page_id=2` / `?rest_route=...`
+>   from colliding with the same path-only cache entry.
 > - **Brute-force protection**: `caddy-ratelimit` plugin baked in
 >   with a default zone of 5 attempts per client IP per 5 minutes
 >   against `POST /wp-login.php` and `POST /xmlrpc.php`. Tunable
@@ -131,6 +134,7 @@ An enterprise-grade WordPress image built for scale. It uses the new FrankenPHP 
 - `CACHE_LOC`: Where to store cache. Defaults to /var/www/html/wp-content/cache
 - `CACHE_RESPONSE_CODES`: Which status codes to cache. Defaults to 200,404,405
 - `BYPASS_PATH_PREFIX`: Which path prefixes to not cache. Defaults to /wp-admin,/wp-json
+- `BYPASS_QUERY_STRINGS`: Whether requests with non-empty query strings should bypass cache. Defaults to true.
 - `BYPASS_HOME`: Whether to skip caching home. Defaults to false.
 - `PURGE_KEY`: Create a purge key that must be validated on purge requests. Helps to prevent malicious intent. No default.
 - `PURGE_PATH`: Create a custom route for the cache purge API path. Defaults to /\_\_cache/purge.
