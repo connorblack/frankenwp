@@ -186,8 +186,7 @@ RUN install-php-extensions \
     redis \
     zip \
     # See https://github.com/Imagick/imagick/issues/640#issuecomment-2077206945
-    imagick/imagick@master \
-    && rm -f $PHP_INI_DIR/conf.d/docker-php-ext-opcache.ini
+    imagick/imagick@master
 
 
 RUN cp $PHP_INI_DIR/php.ini-production $PHP_INI_DIR/php.ini
@@ -196,6 +195,13 @@ COPY php.ini $PHP_INI_DIR/conf.d/wp.ini
 COPY --from=wp /usr/src/wordpress /usr/src/wordpress
 COPY --from=wp /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d/
 COPY --from=wp /usr/local/bin/docker-entrypoint.sh /usr/local/bin/
+
+# Remove the inherited docker-php-ext-opcache.ini AFTER the COPY from
+# the wordpress image — that COPY ships its own copy of the file and
+# would otherwise re-introduce it (regardless of any earlier rm). See
+# the long comment block above the install-php-extensions RUN for the
+# why; this RUN is the actual fix.
+RUN rm -f $PHP_INI_DIR/conf.d/docker-php-ext-opcache.ini
 
 
 # set recommended PHP.ini settings
