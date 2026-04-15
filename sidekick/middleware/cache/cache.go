@@ -249,7 +249,10 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 	if strings.Contains(r.URL.Path, c.PurgePath) && r.Method == "GET" {
 		key := r.Header.Get("X-WPSidekick-Purge-Key")
 
-		if key == c.PurgeKey {
+		// Only return cache inventory when a non-empty purge key is
+		// configured and the request supplies the matching key. Empty
+		// keys must not leak the cache listing to unauthenticated callers.
+		if c.PurgeKey != "" && key == c.PurgeKey {
 			cacheList := db.List()
 
 			json.NewEncoder(w).Encode(cacheList)

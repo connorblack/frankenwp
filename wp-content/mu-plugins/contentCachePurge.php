@@ -19,11 +19,11 @@ add_action('save_post', function ($id) {
     $purge_path = getenv('PURGE_PATH') ?: '/__cache/purge';
     $purge_key  = getenv('PURGE_KEY') ?: '';
 
-    // No key => sidekick cache purge is unauthenticated => skip silently.
-    // Operators wanting cache purge set PURGE_KEY (a random secret).
-    if ($purge_key === '') {
-        return;
-    }
+    // When PURGE_KEY is unset, purge requests are sent without auth.
+    // Sidekick accepts empty-key purges when its own PURGE_KEY config
+    // is also empty (the default). This keeps cache invalidation
+    // working out of the box. Operators who want auth-gated purges
+    // set PURGE_KEY to a shared secret in their env.
 
     $post = get_post($id);
     if (! $post || empty($post->post_name)) {

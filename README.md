@@ -3,8 +3,7 @@
 > **This is a fork** of [StephenMiracle/frankenwp](https://github.com/StephenMiracle/frankenwp)
 > (last upstream activity June 2024). Maintained at
 > [connorblack/frankenwp](https://github.com/connorblack/frankenwp).
-> Published as `ghcr.io/connorblack/frankenwp:latest-php8.3` (and to
-> Docker Hub when `DOCKERHUB_USERNAME` secret is set).
+> Published as `ghcr.io/connorblack/frankenwp:latest-php8.5` (GHCR only).
 >
 > **What this fork changes vs. upstream:**
 > - **PHP 8.5 default** (was 8.3). Pinned to `dunglas/frankenphp:1-php8.5`
@@ -78,12 +77,13 @@
 >   `DISABLE_WP_CRON=1` (when paired with an external scheduler).
 >   String-or-boolean constants like `WP_AUTO_UPDATE_CORE` go via
 >   `WORDPRESS_CONFIG_EXTRA` per upstream pattern.
-> - **Go runtime tuning**: `ENV GOMEMLIMIT=0` (operator MUST set to
->   ~80% of container memory limit, e.g. `GOMEMLIMIT=1638MiB` for
->   2 GB containers — without this Go GC ignores the cgroup and OOM
->   kills mid-burst); `ENV GODEBUG=cgocheck=0` (disables CGO pointer
->   checks for ~10-20% per-request speedup, default in upstream image
->   but explicit here for grep-discovery).
+> - **Go runtime tuning**: `GOMEMLIMIT` is deliberately NOT set in
+>   the image — operators MUST set it at deploy time to ~80% of
+>   container memory (e.g. `GOMEMLIMIT=1638MiB` for 2 GB containers).
+>   Without it Go GC ignores the cgroup limit and OOM-kills under
+>   burst. Do NOT set `GOMEMLIMIT=0` (that's a zero-byte limit, not
+>   "no limit"). `ENV GODEBUG=cgocheck=0` disables CGO pointer checks
+>   for ~10-20% per-request speedup.
 > - **CVE scanning**: GHA workflow runs `aquasecurity/trivy-action`
 >   non-blockingly after each multi-arch publish; results land in
 >   GitHub Security tab as SARIF.
@@ -103,7 +103,7 @@ An enterprise-grade WordPress image built for scale. It uses the new FrankenPHP 
 
 ## Getting Started
 
-- [Docker Images](https://hub.docker.com/r/wpeverywhere/frankenwp "Docker Hub")
+- [Docker Images](https://github.com/connorblack/frankenwp/pkgs/container/frankenwp "GHCR")
 - [Slack](https://join.slack.com/t/wpeverywhere/shared_invite/zt-2k88x3jtv-dpJHRYJ2IDT9PNQpO96zxQ "Slack")
 - [Website](https://wpeverywhere.com)
 
@@ -176,6 +176,7 @@ query-string variants cannot survive a post save.
 - `DB_TABLE_PREFIX`: The WordPress database table prefix.
 - `WP_DEBUG`: Turns on WordPress Debug.
 - `FORCE_HTTPS`: Tells WordPress to use https on requests. This is beneficial behind a TLS-terminating edge. Defaults to false.
+- `TRUSTED_PROXY_RANGES`: Override the default `private_ranges` trusted proxy set. On shared VPCs or Kubernetes where multiple private-network clients can reach the container, set to your actual proxy IP(s) (e.g. `172.17.0.1`) to prevent `X-Forwarded-For` spoofing that bypasses the rate limiter.
 - `WORDPRESS_CONFIG_EXTRA`: use this for adding WP_HOME, WP_SITEURL, etc
 
 ## Questions

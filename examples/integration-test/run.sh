@@ -19,6 +19,11 @@ cd "$(dirname "$0")"
 # compose project on the operator's machine.
 export COMPOSE_PROJECT_NAME=frankenwp-integration
 
+# Configurable host port so operators with a port collision can run:
+#   TEST_PORT=9999 bash examples/integration-test/run.sh
+export TEST_PORT="${TEST_PORT:-8181}"
+export URL="http://localhost:${TEST_PORT}"
+
 # Helper: container ID lookup (compose service name → docker ID).
 wordpress_cid() { docker compose ps -q wordpress; }
 
@@ -70,13 +75,21 @@ else
   record "✗ wp-cli smoke failed"
 fi
 
-# 5. Summary
+# 5. Run cache tests
+echo "── tests/03-cache.sh ──"
+if bash tests/03-cache.sh; then
+  record "✓ cache tests passed"
+else
+  record "✗ cache tests failed"
+fi
+
+# 6. Summary
 echo
 echo "── summary ──"
 printf '  %s\n' "${results[@]}"
 fail_count=$(printf '%s\n' "${results[@]}" | grep -c '^✗' || true)
 
-# 6. Tear down (unless asked to leave it up)
+# 7. Tear down (unless asked to leave it up)
 if [[ "${SKIP_TEARDOWN:-0}" != "1" ]]; then
   echo "── docker compose down -v ──"
   docker compose down -v

@@ -100,7 +100,7 @@ echo "── WP hardening constants (DISALLOW_FILE_EDIT) ──"
 # install in 02-wp-cli.sh too. If install fails, the constant probe
 # also fails — that's fine, both surface as failures.
 docker exec --user www-data "$CID" wp --path=/var/www/html core install \
-  --url=http://localhost:8181 \
+  --url="${URL}" \
   --title='IntegTest' \
   --admin_user='admin' \
   --admin_password='admin-test-pw' \
