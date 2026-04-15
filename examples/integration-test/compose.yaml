@@ -1,0 +1,83 @@
+# Sellie fork integration test stack. Builds the image from the
+# fork's Dockerfile, wires it to a MariaDB sidecar, exposes the
+# container on host port 8181 so the test runner can probe it.
+#
+# Run: ./run.sh from this directory.
+#
+# Deliberately simple: no Caddy out-front, no Cloudflare proxy
+# simulation. The point is to verify the *image's own* hardening
+# (security headers, /healthz, rate limit, opcache+JIT, mu-plugin
+# behavior). Edge-topology tests run separately on real Coolify.
+
+services:
+  wordpress:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        # Keep the integration test on the same release line as the
+        # image we publish. Override at compose-up time if testing
+        # a specific FRANKENPHP_COMMIT.
+        PHP_VERSION: "8.5"
+        FRANKENPHP_TAG: "1"
+    image: frankenwp:integration-test
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # 8181 to avoid collision with anyone running a local dev WP
+      # on 8080. Tests probe http://localhost:8181/.
+      - "8181:80"
+    environment:
+      # Let the test exercise SERVER_NAME with port-only (matches
+      # production behind a TLS-terminating proxy).
+      SERVER_NAME: ":80"
+
+      # WP DB wiring (matches docker-library/wordpress conventions).
+      WORDPRESS_DB_HOST: "db:3306"
+      WORDPRESS_DB_USER: "wordpress"
+      WORDPRESS_DB_PASSWORD: "wordpress-test"
+      WORDPRESS_DB_NAME: "wordpress"
+      WORDPRESS_TABLE_PREFIX: "wp_"
+
+      # Sellie fork production hardening — every env var the image
+      # honors gets set here so the integration test exercises the
+      # full code path. Defaults are documented in README.md.
+      FORCE_HTTPS: "0"               # would break test (no TLS at port 80)
+      DISABLE_WP_CRON: "1"
+      DISALLOW_FILE_EDIT: "1"
+      OPCACHE_JIT: "tracing"
+      OPCACHE_JIT_BUFFER_SIZE: "64M"
+      GOMEMLIMIT: "768MiB"           # 80% of below `mem_limit`
+      WP_LOGIN_RATE_EVENTS: "3"      # tighter than default to make rate-limit test fast
+      WP_LOGIN_RATE_WINDOW: "1m"
+
+    # Container memory ceiling — sized so GOMEMLIMIT (768MiB) leaves
+    # ~20% headroom for non-Go allocations (PHP heap, file caches).
+    mem_limit: 1g
+
+    healthcheck:
+      # Hits the /healthz endpoint we added to the Caddyfile —
+      # bypasses PHP entirely so a pre-WP-install container is still
+      # marked healthy at the HTTP layer.
+      test: ["CMD", "curl", "-fsS", "http://localhost/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  db:
+    image: mariadb:11
+    restart: "no"
+    environment:
+      MARIADB_DATABASE: "wordpress"
+      MARIADB_USER: "wordpress"
+      MARIADB_PASSWORD: "wordpress-test"
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s

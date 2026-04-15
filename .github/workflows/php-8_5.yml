@@ -142,3 +142,36 @@ jobs:
       - name: Inspect resulting manifest
         run: |
           docker buildx imagetools inspect "${IMAGE}:latest-php8.5"
+
+  scan:
+    # CVE scan, non-blocking. Runs after the multi-arch image is
+    # published so we can report against the canonical tag. Findings
+    # land as a SARIF file uploaded to the GitHub Security tab; we
+    # don't fail the build on findings (would block deploys for
+    # unfixable upstream CVEs that we'd accept the risk on anyway).
+    # https://github.com/aquasecurity/trivy-action
+    runs-on: ubuntu-latest
+    needs: merge
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - name: Run Trivy on the multi-arch image (HIGH+CRITICAL)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ env.IMAGE }}:latest-php8.5
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          # Continue past Trivy's own exit-code on findings.
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        # always(): even if Trivy errors, surface what we have.
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy

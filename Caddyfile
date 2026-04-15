@@ -1,6 +1,37 @@
 {
 	local_certs
-	auto_https disable_redirects # This is required to avoid redirect loops when using a reverse proxy and cloud load balancers.
+	# Required to avoid redirect loops when behind a reverse proxy / cloud
+	# load balancer (Cloudflare → tunnel → Coolify Traefik → here, for
+	# example): the upstream proxy already terminates TLS and forwards
+	# plain HTTP, so Caddy's own redirect-to-HTTPS would loop forever.
+	auto_https disable_redirects
+
+	servers {
+		# Trust the proxy chain for {client_ip} / X-Forwarded-* parsing.
+		# `private_ranges` covers RFC1918 + loopback + link-local — the
+		# default-safe set for "behind any reverse proxy on the same host
+		# or private network." Without this, Caddy treats Traefik's IP as
+		# the client and downstream WP plugins (Wordfence, rate-limiters,
+		# is_user_logged_in() edge cases) lose the real visitor IP.
+		# https://caddyserver.com/docs/caddyfile/options#trusted-proxies
+		trusted_proxies static private_ranges
+
+		# Bound request lifetime so a slow/stalled client can't pin a
+		# PHP thread forever. read_header is the strict gate (10s for a
+		# misbehaving client to send the request line + headers);
+		# read_body allows the body slow path (60s for chunked uploads);
+		# write accommodates long PHP responses (5min for theme builder
+		# save / WP_DEBUG=1 stack-trace dumps); idle allows keepalive
+		# connections to amortize across requests.
+		# https://caddyserver.com/docs/caddyfile/options#timeouts
+		timeouts {
+			read_header 10s
+			read_body 60s
+			write 5m
+			idle 5m
+		}
+	}
+
 	{$CADDY_GLOBAL_OPTIONS}
 
 	frankenphp {
@@ -13,6 +44,11 @@
 	order php before file_server
 	order wp_cache before rewrite
 	order request_header before wp_cache
+
+	# rate_limit must run BEFORE wp_cache + php_server so we reject
+	# brute-force attempts before allocating any handler resources.
+	# https://github.com/mholt/caddy-ratelimit#order
+	order rate_limit before wp_cache
 }
 
 {$CADDY_EXTRA_CONFIG}
@@ -23,12 +59,95 @@
 {$SERVER_NAME:localhost} {
 	@static {
 		file
-		path *.ico *.css *.js *.gif *.jpg *.jpeg *.png *.svg *.woff
+		path *.ico *.css *.js *.gif *.jpg *.jpeg *.png *.svg *.woff *.woff2 *.avif *.webp
 	}
 
 	root * /var/www/html/
-	encode br zstd gzip
-	
+
+	# Cap request body at the edge before PHP allocates buffers. Matches
+	# php.ini upload_max_filesize (512M) so the limits agree — Caddy
+	# returns 413 Payload Too Large before PHP ever sees the request.
+	# Operators can raise via env var for media sites with huge uploads.
+	# https://caddyserver.com/docs/caddyfile/directives/request_body
+	request_body {
+		max_size {$REQUEST_BODY_MAX_SIZE:512MB}
+	}
+
+	# Order matters: zstd before brotli before gzip. Caddy negotiates by
+	# scanning the encode list left-to-right and matching against the
+	# client's Accept-Encoding; zstd has lower CPU cost than brotli for
+	# dynamic HTML and most modern browsers (Chrome 123+, Firefox 126+)
+	# accept it. minimum_length avoids the cost of compressing tiny
+	# admin-ajax responses where the win is sub-byte.
+	# https://caddyserver.com/docs/caddyfile/directives/encode
+	encode {
+		zstd
+		br
+		gzip
+		minimum_length 1024
+	}
+
+	# Origin security headers. Cloudflare's "Managed Transforms" can also
+	# inject most of these, but only when toggled on per-zone, and HSTS +
+	# `-Server` suppression are origin's job per Cloudflare's own docs.
+	# Setting them at origin makes the deployment safe even when the edge
+	# is misconfigured or replaced (Fastly, ALB, no edge at all).
+	#
+	# Deliberate omissions:
+	#   - Content-Security-Policy: WP plugins inject inline scripts
+	#     pervasively (Gutenberg, page builders, analytics); a baseline
+	#     CSP breaks them. Operators add CSP per-site via env var or
+	#     edge transform rule when their plugin set permits it.
+	#   - Cross-Origin-* headers: too restrictive for embed/iframe-heavy
+	#     WP themes; opt-in via {$CADDY_SERVER_EXTRA_DIRECTIVES}.
+	header {
+		-Server
+		-X-Powered-By
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "interest-cohort=()"
+		# Content-Security-Policy is intentionally NOT set here. WP
+		# plugins inject inline scripts pervasively (Gutenberg, page
+		# builders, analytics) so a baseline CSP would break them. To
+		# opt in, operators add via CADDY_SERVER_EXTRA_DIRECTIVES env:
+		#   CADDY_SERVER_EXTRA_DIRECTIVES="header Content-Security-Policy \"default-src 'self' ...\""
+	}
+
+	# Brute-force protection for WP's auth endpoints. caddy-ratelimit
+	# sliding-window: by default 5 attempts per client IP per 5 minutes
+	# against POST /wp-login.php and POST /xmlrpc.php. Both are the
+	# canonical credential-stuffing vectors against WP. Tunable via
+	# WP_LOGIN_RATE_EVENTS + WP_LOGIN_RATE_WINDOW env vars; set events
+	# to a very large number to effectively disable. {client_ip} comes
+	# from the X-Forwarded-* trust chain we set up in the global
+	# `servers { trusted_proxies ... }` block above — without that,
+	# every request looks like the proxy IP and the limit triggers
+	# immediately for all users.
+	# https://github.com/mholt/caddy-ratelimit
+	rate_limit {
+		zone wp_auth_per_ip {
+			match {
+				method POST
+				path /wp-login.php /xmlrpc.php
+			}
+			key {client_ip}
+			events {$WP_LOGIN_RATE_EVENTS:5}
+			window {$WP_LOGIN_RATE_WINDOW:5m}
+		}
+	}
+
+	# Plain-200 health endpoint that bypasses PHP entirely. Coolify and
+	# Traefik probe `/healthz` on the container side; routing this
+	# through WP would 301/500 during plugin install, theme switch, or
+	# DB downtime — all states where we want the container to still
+	# report healthy at the HTTP layer (the app issue is the operator's
+	# to fix, not the orchestrator's to react to with a restart).
+	handle /healthz {
+		respond "ok" 200
+	}
+
 	wp_cache {
 		loc {$CACHE_LOC:/var/www/html/wp-content/cache}
 		cache_response_codes {$CACHE_RESPONSE_CODES:2XX,404,405}
@@ -36,7 +155,13 @@
 		purge_path {$PURGE_PATH:/__cache/purge}
 		purge_key {$PURGE_KEY}
 		bypass_home {$BYPASS_HOME:false}
-		bypass_path_prefixes {$BYPASS_PATH_PREFIXES:/wp-admin,/wp-json}
+		# Defaults expanded vs upstream: /wp-login.php and /xmlrpc.php
+		# both authenticate per-request and must never serve from cache;
+		# the upstream default of just /wp-admin,/wp-json missed both
+		# (a stale wp-login.php response could serve another visitor's
+		# nonce). Operators on edge cache (Cloudflare) usually want
+		# bypass_home=true via env so CF owns HTML cache exclusively.
+		bypass_path_prefixes {$BYPASS_PATH_PREFIXES:/wp-admin,/wp-json,/wp-login.php,/xmlrpc.php}
 	}
 
 	{$CADDY_SERVER_EXTRA_DIRECTIVES}

@@ -28,8 +28,68 @@
 >   are unset; skips the purge call entirely when no `PURGE_KEY` is
 >   configured.
 > - GitHub Actions workflow publishes to GHCR (zero-config via
->   `GITHUB_TOKEN`) plus optional Docker Hub mirror.
+>   `GITHUB_TOKEN`) plus optional Docker Hub mirror, on a native
+>   arm64 build matrix (`ubuntu-latest` + `ubuntu-24.04-arm`)
+>   instead of QEMU-emulated arm64 — ~10× faster steady-state CI.
 > - Dropped `php-8_2.yaml` workflow (PHP 8.2 is EOL).
+> - **Caddyfile hardening**: `trusted_proxies static private_ranges`
+>   so `{client_ip}` is the real visitor IP behind a reverse proxy;
+>   `servers { timeouts { read_header 10s; read_body 60s; write 5m;
+>   idle 5m } }` to bound stalled requests; security-header set
+>   (HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy,
+>   Permissions-Policy, `-Server`, `-X-Powered-By`); `request_body
+>   max_size 512MB` matched to `php.ini upload_max_filesize` so the
+>   limits agree; `/healthz` endpoint that bypasses PHP entirely
+>   (Coolify/Traefik-friendly liveness probe); `wp_cache
+>   bypass_path_prefixes` extended to include `/wp-login.php` +
+>   `/xmlrpc.php` (upstream missed both — stale auth nonce risk).
+> - **Brute-force protection**: `caddy-ratelimit` plugin baked in
+>   with a default zone of 5 attempts per client IP per 5 minutes
+>   against `POST /wp-login.php` and `POST /xmlrpc.php`. Tunable
+>   via `WP_LOGIN_RATE_EVENTS` + `WP_LOGIN_RATE_WINDOW`.
+> - **opcache + JIT tuning**: `opcache.memory_consumption=256`
+>   (was 128, exhausted on real plugin sets), `interned_strings_buffer=16`,
+>   `max_accelerated_files=10000` (was 4000), `revalidate_freq=60`
+>   (was 2, ~30× fewer stat() syscalls/req). JIT enabled in tracing
+>   mode by default (`OPCACHE_JIT=tracing`, buffer 64M); env-gated.
+> - **`php.ini` production defaults**: `memory_limit=256M`,
+>   `max_execution_time=120`, `realpath_cache_size=4M`,
+>   `realpath_cache_ttl=600`, `max_input_vars=5000`. Override via
+>   any 99-*.ini file dropped into `$PHP_INI_DIR/conf.d/`.
+> - **`redis` PHP extension** preinstalled. Drop in
+>   [rhubarbgroup/redis-cache](https://wordpress.org/plugins/redis-cache/)
+>   and wire `WP_REDIS_HOST` for object cache without rebuilding.
+> - **`caddy-cache-handler` (Souin)** baked in alongside sidekick.
+>   Not enabled in the baseline Caddyfile — sidekick remains the
+>   default cache. Souin is available for operators that want to
+>   migrate (more featureful, distributed); enable via
+>   `CADDY_GLOBAL_OPTIONS` + `CADDY_SERVER_EXTRA_DIRECTIVES`.
+> - **WP hardening constants** baked into `wp-config-docker.php`
+>   via env vars: `DISALLOW_FILE_EDIT=1` (block dashboard
+>   plugin/theme code editor — WP's own hardening recommendation),
+>   `DISABLE_WP_CRON=1` (when paired with an external scheduler).
+>   String-or-boolean constants like `WP_AUTO_UPDATE_CORE` go via
+>   `WORDPRESS_CONFIG_EXTRA` per upstream pattern.
+> - **Go runtime tuning**: `ENV GOMEMLIMIT=0` (operator MUST set to
+>   ~80% of container memory limit, e.g. `GOMEMLIMIT=1638MiB` for
+>   2 GB containers — without this Go GC ignores the cgroup and OOM
+>   kills mid-burst); `ENV GODEBUG=cgocheck=0` (disables CGO pointer
+>   checks for ~10-20% per-request speedup, default in upstream image
+>   but explicit here for grep-discovery).
+> - **CVE scanning**: GHA workflow runs `aquasecurity/trivy-action`
+>   non-blockingly after each multi-arch publish; results land in
+>   GitHub Security tab as SARIF.
+> - **Image hygiene**: dropped upstream's redundant pre-install of
+>   dev headers (libonig/libxml2/libcurl/libssl/libzip/libjpeg/
+>   libwebp/libmemcached) — `install-php-extensions` already manages
+>   its own build deps and cleans them up. Also dropped `ghostscript`
+>   (CVE magnet — Imagick's PDF→raster delegate; not used by typical
+>   WP image processing) and `git`/`unzip` (build-time only).
+> - **Integration test**: `examples/integration-test/` — Docker
+>   Compose stack (image + MariaDB) with a probe runner that
+>   verifies security headers, /healthz, rate-limit behavior,
+>   opcache+JIT live state, WP-CLI smoke, REST API liveness.
+>   Run: `bash examples/integration-test/run.sh`.
 
 An enterprise-grade WordPress image built for scale. It uses the new FrankenPHP server bundled with Caddy. Lightning-fast server side caching Caddy module.
 
