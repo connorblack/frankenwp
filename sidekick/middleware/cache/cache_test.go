@@ -115,3 +115,67 @@ func TestServeHTTPUsesDistinctKeysWhenCachingQueryStrings(t *testing.T) {
 		t.Fatalf("expected next handler to run twice (two unique query strings), got %d", hits)
 	}
 }
+
+func TestHeaderContainsAnySubstring(t *testing.T) {
+	t.Run("matches a configured cookie fragment", func(t *testing.T) {
+		got := headerContainsAnySubstring(
+			"wordpress_logged_in_abc=1; foo=bar",
+			[]string{"wordpress_logged_in", "wp_woocommerce_session_"},
+		)
+		if !got {
+			t.Fatal("expected logged-in cookie fragment to match")
+		}
+	})
+
+	t.Run("ignores empty fragments", func(t *testing.T) {
+		got := headerContainsAnySubstring(
+			"foo=bar",
+			[]string{"", "   ", "wp_woocommerce_session_"},
+		)
+		if got {
+			t.Fatal("expected empty fragments to be ignored")
+		}
+	})
+
+	t.Run("returns false when nothing matches", func(t *testing.T) {
+		got := headerContainsAnySubstring(
+			"foo=bar; baz=qux",
+			[]string{"wordpress_logged_in", "woocommerce_cart_hash"},
+		)
+		if got {
+			t.Fatal("expected no cookie fragment match")
+		}
+	})
+}
+
+func TestServeHTTPBypassesConfiguredCookieFlows(t *testing.T) {
+	cache := Cache{
+		logger:                 zap.NewNop(),
+		PurgePath:              "/__cache/purge",
+		BypassCookieSubstrings: []string{"wordpress_logged_in", "woocommerce_cart_hash"},
+		CacheResponseCodes:     []string{"2"},
+	}
+
+	called := false
+	next := testHandler(func(w http.ResponseWriter, r *http.Request) error {
+		called = true
+		_, err := w.Write([]byte("cookie-bypassed"))
+		return err
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.Header.Set("Cookie", "woocommerce_cart_hash=abc123")
+	rec := httptest.NewRecorder()
+
+	if err := cache.ServeHTTP(rec, req, next); err != nil {
+		t.Fatalf("ServeHTTP returned error: %v", err)
+	}
+
+	if !called {
+		t.Fatal("expected cookie-marked request to bypass cache and hit next handler")
+	}
+
+	if got := rec.Header().Get("X-WPEverywhere-Cache"); got != "" {
+		t.Fatalf("expected bypassed cookie request to avoid cache header, got %q", got)
+	}
+}

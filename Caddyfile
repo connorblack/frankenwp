@@ -161,6 +161,28 @@
 		respond "ok" 200
 	}
 
+	# REST API parity: support `/wp-json/` on both plain-permalink and
+	# pretty-permalink installs. WordPress' query form (`?rest_route=/`)
+	# works even when permalink_structure is empty; Caddy rewrites the
+	# pretty path to that canonical form before the request reaches cache
+	# or PHP. Existing query parameters remain attached.
+	@wpjson_root path /wp-json /wp-json/
+	@wpjson_child path_regexp wpjson_child ^/wp-json(?P<rest>/.+)$
+
+	handle @wpjson_root {
+		route {
+			rewrite /?rest_route=/&{query}
+			php_server
+		}
+	}
+
+	handle @wpjson_child {
+		route {
+			rewrite /?rest_route={re.wpjson_child.rest}&{query}
+			php_server
+		}
+	}
+
 	wp_cache {
 		loc {$CACHE_LOC:/var/www/html/wp-content/cache}
 		cache_response_codes {$CACHE_RESPONSE_CODES:2XX,404,405}
@@ -177,6 +199,10 @@
 		# BYPASS_HOME=true so the CDN owns HTML caching; bare origin-cache
 		# deployments can keep the default false.
 		bypass_home {$BYPASS_HOME:false}
+		# Cookie-driven bypasses for dynamic/user-specific flows. Keep
+		# this explicit so page-cache behavior doesn't depend on scattered
+		# plugin assumptions or hard-coded conditionals inside the module.
+		bypass_cookie_substrings {$BYPASS_COOKIE_SUBSTRINGS:wordpress_logged_in,wordpress_sec_,wp-postpass_,comment_author_,wp_woocommerce_session_,woocommerce_items_in_cart,woocommerce_cart_hash}
 		# Defaults expanded vs upstream: /wp-login.php and /xmlrpc.php
 		# both authenticate per-request and must never serve from cache;
 		# the upstream default of just /wp-admin,/wp-json missed both

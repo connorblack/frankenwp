@@ -16,6 +16,7 @@ services:
       TTL: ${TTL:-80000}
       PURGE_PATH: ${PURGE_PATH:-/__cache/purge}
       PURGE_KEY: ${PURGE_KEY:-}
+      BYPASS_COOKIE_SUBSTRINGS: ${BYPASS_COOKIE_SUBSTRINGS:-wordpress_logged_in,wordpress_sec_,wp-postpass_,comment_author_,wp_woocommerce_session_,woocommerce_items_in_cart,woocommerce_cart_hash}
       BYPASS_QUERY_STRINGS: ${BYPASS_QUERY_STRINGS:-true}
       BYPASS_HOME: ${BYPASS_HOME:-false}
       BYPASS_PATH_PREFIXES: ${BYPASS_PATH_PREFIXES:-/wp-admin,wp-includes}

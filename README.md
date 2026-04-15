@@ -134,11 +134,31 @@ An enterprise-grade WordPress image built for scale. It uses the new FrankenPHP 
 - `CACHE_LOC`: Where to store cache. Defaults to /var/www/html/wp-content/cache
 - `CACHE_RESPONSE_CODES`: Which status codes to cache. Defaults to 200,404,405
 - `BYPASS_PATH_PREFIX`: Which path prefixes to not cache. Defaults to /wp-admin,/wp-json
+- `BYPASS_COOKIE_SUBSTRINGS`: Comma-separated cookie fragments that bypass page cache. Defaults to `wordpress_logged_in,wordpress_sec_,wp-postpass_,comment_author_,wp_woocommerce_session_,woocommerce_items_in_cart,woocommerce_cart_hash`.
 - `BYPASS_QUERY_STRINGS`: Whether requests with non-empty query strings should bypass cache. Defaults to true.
 - `BYPASS_HOME`: Whether to skip caching home. Defaults to false.
 - `PURGE_KEY`: Create a purge key that must be validated on purge requests. Helps to prevent malicious intent. No default.
 - `PURGE_PATH`: Create a custom route for the cache purge API path. Defaults to /\_\_cache/purge.
 - `TTL`: Defines how long objects should be stored in cache. Defaults to 6000.
+
+### Managed exclusion contract
+
+The production posture is intentionally conservative:
+
+| Concern | Default behavior |
+| --- | --- |
+| Home page | Cacheable at origin unless `BYPASS_HOME=true` |
+| Non-empty query strings | Bypass page cache |
+| Login/admin paths | Bypass page cache |
+| Logged-in / session cookies | Bypass page cache |
+| REST pretty path `/wp-json/` | Rewritten to `?rest_route=` before cache/PHP |
+| REST query form `?rest_route=` | Bypass page cache via query-string policy |
+| Marketing params (`utm_*`, `gclid`, `fbclid`) | Bypass page cache |
+| Dynamic session/cart cookies | Bypass page cache |
+
+This keeps the cache correctness-first. If you later want WP Engine-style
+marketing-parameter normalization, add it deliberately instead of turning
+query-string caching back on broadly.
 
 #### Wordpress
 

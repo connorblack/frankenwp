@@ -16,16 +16,17 @@ import (
 )
 
 type Cache struct {
-	logger             *zap.Logger
-	Loc                string
-	PurgePath          string
-	PurgeKey           string
-	BypassPathPrefixes []string
-	BypassHome         bool
-	BypassQueryStrings bool
-	CacheResponseCodes []string
-	TTL                int
-	Store              *Store
+	logger                 *zap.Logger
+	Loc                    string
+	PurgePath              string
+	PurgeKey               string
+	BypassPathPrefixes     []string
+	BypassCookieSubstrings []string
+	BypassHome             bool
+	BypassQueryStrings     bool
+	CacheResponseCodes     []string
+	TTL                    int
+	Store                  *Store
 }
 
 func init() {
@@ -59,6 +60,9 @@ func (c *Cache) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
 		case "bypass_path_prefixes":
 			c.BypassPathPrefixes = strings.Split(strings.TrimSpace(value), ",")
+
+		case "bypass_cookie_substrings":
+			c.BypassCookieSubstrings = strings.Split(strings.TrimSpace(value), ",")
 
 		case "bypass_home":
 			c.BypassHome = strings.EqualFold(value, "true")
@@ -121,6 +125,13 @@ func (c *Cache) Provision(ctx caddy.Context) error {
 		c.BypassPathPrefixes = strings.Split(strings.TrimSpace(os.Getenv("BYPASS_PATH_PREFIX")), ",")
 	}
 
+	if c.BypassCookieSubstrings == nil {
+		c.BypassCookieSubstrings = strings.Split(
+			strings.TrimSpace(os.Getenv("BYPASS_COOKIE_SUBSTRINGS")),
+			",",
+		)
+	}
+
 	if c.BypassHome == false {
 		if os.Getenv("BYPASS_HOME") == strings.ToLower("true") {
 			c.BypassHome = true
@@ -177,6 +188,21 @@ func cachePathForRequest(r *http.Request) string {
 
 func cacheKeyForRequest(r *http.Request, encoding string) string {
 	return encoding + "::" + cachePathForRequest(r)
+}
+
+func headerContainsAnySubstring(
+	value string,
+	substrings []string,
+) bool {
+	for _, substring := range substrings {
+		if substring == "" {
+			continue
+		}
+		if strings.Contains(value, substring) {
+			return true
+		}
+	}
+	return false
 }
 
 // ServeHTTP implements the caddy.Handler interface.
@@ -255,9 +281,12 @@ func (c Cache) ServeHTTP(w http.ResponseWriter, r *http.Request,
 		return nil
 	}
 
-	// bypass if is logged in. We don't want to cache admin bars
+	// Cookie-driven flows are dynamic even on front-end paths. Bypass the
+	// page cache when a request carries any of the configured marker
+	// cookies so logged-in sessions, password-protected posts, comment
+	// forms, and commerce/cart state never share cached HTML.
 	cookies := r.Header.Get("Cookie")
-	if strings.Contains(cookies, "wordpress_logged_in") {
+	if headerContainsAnySubstring(cookies, c.BypassCookieSubstrings) {
 		return next.ServeHTTP(w, r)
 	}
 

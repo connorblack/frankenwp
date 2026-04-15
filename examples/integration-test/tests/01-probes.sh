@@ -107,14 +107,43 @@ docker exec --user www-data "$CID" wp --path=/var/www/html core install \
 HOME_TITLE=$(curl -sS "$URL/" | grep -m1 -o '<title>[^<]*</title>')
 PAGE_TITLE=$(curl -sS "$URL/?page_id=2" | grep -m1 -o '<title>[^<]*</title>')
 POST_TITLE=$(curl -sS "$URL/?p=1" | grep -m1 -o '<title>[^<]*</title>')
+SEARCH_TITLE=$(curl -sS "$URL/?s=hello" | grep -m1 -o '<title>[^<]*</title>')
+REST_QUERY_JSON=$(curl -fsS "$URL/?rest_route=/")
+REST_PRETTY_JSON=$(curl -fsS "$URL/wp-json/")
+UTM_HEADERS=$(curl -sS -D - -o /dev/null "$URL/?utm_source=test")
+GCLID_HEADERS=$(curl -sS -D - -o /dev/null "$URL/?gclid=test")
+FBCLID_HEADERS=$(curl -sS -D - -o /dev/null "$URL/?fbclid=test")
+COOKIE_HEADERS=$(curl -sS -D - -o /dev/null -H 'Cookie: wordpress_logged_in_test=1' "$URL/")
 
 echo "── query-string routing cache regression ──"
 run_test "/?page_id=2 renders Sample Page title" \
                                     "echo \"\$PAGE_TITLE\" | grep -q 'Sample Page'"
 run_test "/?p=1 renders Hello world title" \
                                     "echo \"\$POST_TITLE\" | grep -q 'Hello world'"
+run_test "/?s=hello renders search title" \
+                                    "echo \"\$SEARCH_TITLE\" | grep -q 'Search Results'"
 run_test "home/page/post titles stay distinct" \
                                     "[[ \"\$HOME_TITLE\" != \"\$PAGE_TITLE\" && \"\$HOME_TITLE\" != \"\$POST_TITLE\" && \"\$PAGE_TITLE\" != \"\$POST_TITLE\" ]]"
+run_test "?rest_route=/ returns JSON" \
+                                    "echo \"\$REST_QUERY_JSON\" | grep -q '\"name\"'"
+run_test "/wp-json/ returns JSON on plain permalinks" \
+                                    "echo \"\$REST_PRETTY_JSON\" | grep -q '\"name\"'"
+run_test "utm param bypasses sidekick cache" \
+                                    "! echo \"\$UTM_HEADERS\" | grep -i 'x-wpeverywhere-cache:'"
+run_test "gclid param bypasses sidekick cache" \
+                                    "! echo \"\$GCLID_HEADERS\" | grep -i 'x-wpeverywhere-cache:'"
+run_test "fbclid param bypasses sidekick cache" \
+                                    "! echo \"\$FBCLID_HEADERS\" | grep -i 'x-wpeverywhere-cache:'"
+run_test "logged-in cookie bypasses sidekick cache" \
+                                    "! echo \"\$COOKIE_HEADERS\" | grep -i 'x-wpeverywhere-cache:'"
+
+# New-install baseline: pretty permalinks should still keep /wp-json/
+# functional after rewrite structure changes.
+docker exec --user www-data "$CID" wp --path=/var/www/html rewrite structure '/%postname%/' --hard >/dev/null 2>&1
+docker exec --user www-data "$CID" wp --path=/var/www/html rewrite flush --hard >/dev/null 2>&1
+REST_PRETTY_JSON_AFTER=$(curl -fsS "$URL/wp-json/")
+run_test "/wp-json/ returns JSON after enabling pretty permalinks" \
+                                    "echo \"\$REST_PRETTY_JSON_AFTER\" | grep -q '\"name\"'"
 
 DISALLOW_FE=$(docker exec --user www-data "$CID" wp --path=/var/www/html eval \
   'echo defined("DISALLOW_FILE_EDIT") && DISALLOW_FILE_EDIT === true ? "yes" : "no";' 2>/dev/null)
