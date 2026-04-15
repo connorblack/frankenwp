@@ -141,12 +141,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # install the PHP extensions we need (https://make.wordpress.org/hosting/handbook/handbook/server-environment/#php-extensions)
 #
-# Sellie fork additions vs upstream: redis. Pre-installing the extension
-# here means operators can drop in the rhubarbgroup/redis-cache
-# WordPress plugin and get object cache out of the box without
-# rebuilding. Adds ~2 MB to the image (libhiredis); cost worth paying
-# for the standard "WP > 1k daily visitors" scaling story.
-# https://wordpress.org/plugins/redis-cache/
+# Sellie fork additions vs upstream:
+#
+#   * redis: pre-install the extension so operators can drop in the
+#     rhubarbgroup/redis-cache WordPress plugin and get object cache
+#     out of the box without rebuilding. Adds ~2 MB (libhiredis).
+#     https://wordpress.org/plugins/redis-cache/
+#
+#   * opcache REMOVED from the install list AND the inherited
+#     docker-php-ext-opcache.ini gets deleted. Why:
+#
+#     dunglas/frankenphp builds PHP with opcache as a STATIC extension
+#     (compiled into the PHP binary itself), not a shared module. The
+#     `php` binary therefore has opcache available without any
+#     `zend_extension=opcache.so` directive. But the upstream `php`
+#     image (which dunglas/frankenphp inherits from) ships
+#     `docker-php-ext-opcache.ini` containing `zend_extension=opcache`
+#     for the SHARED-module case — and that directive ACTIVELY BREAKS
+#     the static opcache: PHP tries to dlopen() opcache.so, fails
+#     ("Failed loading Zend extension 'opcache'... No such file"),
+#     and the static module never registers either. Net effect:
+#     opcache is silently disabled in BOTH SAPI and CLI.
+#
+#     Removing the inherited .ini lets the static opcache load
+#     normally. Verified empirically (2026-04-15) on wp-smoke:
+#     before removal — `extension_loaded("Zend OPcache")` = false,
+#     `function_exists("opcache_get_status")` = false. After removal
+#     + container restart — both true, `opcache_get_status()` shows
+#     `{"enabled":true,"on":true,"kind":5,"buffer_size":67108848}`
+#     proving JIT (kind=5 = tracing) is active with our 64M buffer
+#     env-substitution honored. CLI warning also gone.
+#
+#     `install-php-extensions opcache` is correctly omitted because:
+#     (a) it can't install opcache (it's static, no .so to compile —
+#     `make install-modules` errors with "cannot stat 'modules/*'"),
+#     and (b) it would re-create the broken docker-php-ext-opcache.ini
+#     immediately after we delete it.
 RUN install-php-extensions \
     bcmath \
     exif \
@@ -157,7 +187,7 @@ RUN install-php-extensions \
     zip \
     # See https://github.com/Imagick/imagick/issues/640#issuecomment-2077206945
     imagick/imagick@master \
-    opcache
+    && rm -f $PHP_INI_DIR/conf.d/docker-php-ext-opcache.ini
 
 
 RUN cp $PHP_INI_DIR/php.ini-production $PHP_INI_DIR/php.ini
